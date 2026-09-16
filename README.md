@@ -1,8 +1,8 @@
 # boss-auto-apply-skill
 
-BOSS直聘自动投递 **Agent Skill**。装进 Claude Code / Codex / Cursor 等任意支持 skills 的 agent，对它说一句「帮我投 BOSS」，它就按**你自己的** `profile.json` 跑完：粗筛（滚动记录）→ 细筛（串行单岗闭环，过审即发不攒批）→ 台账回填。防风控、断点续跑、猎头挂单过滤、列表页反爬薪资字体解码。
+BOSS直聘自动投递 **Agent Skill**，任何行业、任何城市、应届和实习生都能用。装进 Claude Code / Codex / Cursor 等任意支持 skills 的 agent，对它说一句「帮我投 BOSS」，它先引导你把身份和想投的城市 / 岗位问清楚，再按**你自己的** `profile.json` 跑完：多城市多岗位粗筛（滚动记录）→ 细筛（串行单岗闭环，过审即发不攒批）→ 台账回填。防风控、断点续跑、猎头挂单过滤、列表页反爬薪资字体解码。
 
-代码里没有任何个人信息——谁在投、投什么、怎么说，全部来自你的 profile；没有 profile 库拒绝运行。
+代码里没有任何个人信息，也**没有任何行业预设**（默认不限薪资、不限经验、不拦任何岗位类型）——谁在投、投哪、投什么、拦什么，全部来自你的 profile；信息不全，agent 不会开始投。
 
 ## 安装
 
@@ -35,7 +35,12 @@ ln -s "$(pwd)/boss-auto-apply-skill" ~/.hermes/skills/career/boss-auto-apply-ski
 
 ## 首次使用：建 profile
 
-**不用敲命令。** 装完直接对 agent 说「帮我投 BOSS」，它会按 [SKILL.md](SKILL.md)「首次使用」一次性把自我介绍、链接、话术、城市、关键词、薪资线、黑名单等问齐，自己写到 `~/.boss-auto-apply/profile.json`，校验后把摘要念给你确认。
+**不用敲命令。** 装完直接对 agent 说「帮我投 BOSS」，它会按 [SKILL.md](SKILL.md)「首次使用」分两轮问你：
+
+1. **必填三项**：一句话自我介绍、想投哪些城市（可多个，填城市名即可）、想投哪些岗位（可多个方向）
+2. **可选项**（都有默认值，可以直接跳过）：工作年限档、期望最低月薪、作品链接、话术、不投的公司 / 岗位类型 / 学历要求 / 主语言……
+
+agent 自己写到 `~/.boss-auto-apply/profile.json`，校验后把摘要念给你确认，你说 OK 才开始投。之后想换城市、加岗位、改薪资线，直接跟它说。
 
 想自己手填也行：照 [assets/profile.example.json](assets/profile.example.json) 写到 `~/.boss-auto-apply/profile.json`，然后让 agent「检查一下 profile」。
 
@@ -43,7 +48,7 @@ ln -s "$(pwd)/boss-auto-apply-skill" ~/.hermes/skills/career/boss-auto-apply-ski
 
 对 agent 说「跑今天的投递批次」即可。它会走三步（每步都在 [SKILL.md](SKILL.md) 里有可直接执行的代码）：
 
-1. **粗筛 DISCOVER**：按 `search.queries` 轮换搜索，URL 带服务端筛选（薪资档由 `minSalaryK` 派生 + 工作年限），真实滚轮到平台期，全量落盘；卡级规则过滤（黑名单 / 学历 / 岗位类型 / 主语言 / 薪资 / 公司去重 / 台账排除 / 猎头挂单）。列表页薪资反爬字体每批开 1 个详情页校验映射后直接解码
+1. **粗筛 DISCOVER**：按 `search.cities × search.queries` 逐城市逐关键词搜索，URL 带服务端筛选（薪资档由 `minSalaryK` 派生 + 工作年限，没填就不筛），真实滚轮到平台期，全量落盘；卡级规则过滤（黑名单 / 学历 / 岗位类型 / 主语言 / 薪资 / 公司去重 / 台账排除 / 猎头挂单——除猎头外全是你 profile 里填了才生效）。列表页薪资反爬字体每批开 1 个详情页校验映射后直接解码
 2. **细筛 SCREEN**：逐岗开详情页读真实薪资 + JD 判定；通过**立即发送**定制打招呼语并验证、当场记账，随机间隔后下一岗。外包岗默认落 `NEEDS_REVIEW` 交 agent 读 JD 判断
 3. **收尾 LEDGER**：从 checkpoint 幂等回填总台账（applied / eliminated），跨批次不重复投
 
@@ -51,13 +56,13 @@ ln -s "$(pwd)/boss-auto-apply-skill" ~/.hermes/skills/career/boss-auto-apply-ski
 
 ## 配置（profile.json）
 
-模板 [assets/profile.example.json](assets/profile.example.json)，字段逐条说明在 [SKILL.md](SKILL.md)「首次使用」。四块：
+模板 [assets/profile.example.json](assets/profile.example.json)（一个开发岗的示例画像，规则条目都是示例），字段逐条说明在 [SKILL.md](SKILL.md)「首次使用」。四块：
 
 | 块 | 内容 | 默认 |
 |---|---|---|
-| `candidate` / `message` / `hooks` | 自我介绍、链接、消息模板、「JD 提到 X 就说 Y」话术 | **无默认，必填** |
-| `search` | 城市码、关键词、工作年限档、滚动轮数 | 北京 / Agent 系列词 / 3 年+ / 30 轮 |
-| `rules` | 期望最低月薪、公司黑名单、学历红线、追加岗位类型红线、主语言红线、JD 必含词、猎头 / 外包策略 | 30K / 空 / 硕博 / 实习·储备·销售·客服 4 条固定 + 追加 / Go C++ Rust PHP C# / AI 系列词 / reject / review |
+| `candidate.intro` / `search.cities` / `search.queries` | 自我介绍、城市（名或码，可多个）、岗位关键词（可多个） | **必填** |
+| `candidate.links` / `hooks` / `message` | 作品链接、「JD 提到 X 就说 Y」话术、消息模板 | 无链接 / 无话术（走兜底句）/ 通用模板 |
+| `rules` | 期望最低月薪、公司黑名单、岗位类型红线、学历红线、主语言红线、JD 必含词、猎头 / 外包策略 | **全部不限**（猎头 reject、外包 review 除外） |
 | `pacing` | 每轮最多发几个、发送间隔、时间预算 | 7 / 20-35s / 480s |
 
 不在 profile 里的（反爬解码、选择器、会话定位、发送兜底、间隔下限 15s）是机制，改了只会坏。

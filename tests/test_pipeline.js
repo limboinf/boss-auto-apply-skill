@@ -9,7 +9,7 @@ const pipeline = require('../scripts/pipeline.js')
 const { loadProfile, normalizeProfile, salaryCodesFor, validateProfile, EXAMPLE_PATH } = require('../scripts/profile.js')
 
 const { filterCards, cardSalaryVerdict, evalDetail, makeHook, ownOf, updateLedgerFromCheckpoint, makePipeline, decodeSalaryFont, listUrl } = pipeline
-// 测试用 profile：模板身份 + 本文件需要的黑名单/hook
+// 库默认规则全部「不限」（任何行业可用）；本文件用示例 profile（开发岗画像）显式传 rules 来测各条规则真的生效
 const profile = loadProfile(EXAMPLE_PATH)
 profile.rules.blockCompanies = ['字节跳动', '深度求索']
 profile.hooks = [
@@ -22,15 +22,17 @@ let n = 0
 const ok = (name) => { n++; console.log('PASS', n, name) }
 
 // ---- cardSalaryVerdict ----
-assert.deepStrictEqual(cardSalaryVerdict('30-60K·15薪').keep, true)
-assert.deepStrictEqual(cardSalaryVerdict('25-35K').keep, true)        // Max35>=30 过
-assert.deepStrictEqual(cardSalaryVerdict('20-28K').keep, false)       // Max28<30 淘汰
-assert.deepStrictEqual(cardSalaryVerdict('-K·薪').keep, true)         // 打码留细筛
-assert.deepStrictEqual(cardSalaryVerdict('·薪').keep, true)           // 含薪特征无数字=打码，留细筛
+assert.deepStrictEqual(cardSalaryVerdict('30-60K·15薪', 30).keep, true)
+assert.deepStrictEqual(cardSalaryVerdict('25-35K', 30).keep, true)        // Max35>=30 过
+assert.deepStrictEqual(cardSalaryVerdict('20-28K', 30).keep, false)       // Max28<30 淘汰
+assert.deepStrictEqual(cardSalaryVerdict('-K·薪', 30).keep, true)         // 打码留细筛
+assert.deepStrictEqual(cardSalaryVerdict('·薪', 30).keep, true)           // 含薪特征无数字=打码，留细筛
+// minK=0（默认）：什么都不拦——应届/实习/日薪岗也能投
+for (const t of ['面议', '', '200元/天', '20-28K']) assert.deepStrictEqual(cardSalaryVerdict(t).keep, true, t)
 // 2026-09-16 实测：BOSS 反爬把数字替换为 PUA 不可见字符，「-K·薪」textContent 即「-K·薪」无 ASCII 数字；
 // 规则改为：含 K/薪/元 且无 ASCII 数字 → 打码保留。真正无薪资特征的串（空/乱文本）才淘汰。
-assert.deepStrictEqual(cardSalaryVerdict('面议').keep, false)
-assert.deepStrictEqual(cardSalaryVerdict('').keep, false)
+assert.deepStrictEqual(cardSalaryVerdict('面议', 30).keep, false)
+assert.deepStrictEqual(cardSalaryVerdict('', 30).keep, false)
 
 // ---- filterCards ----
 const cards = [
@@ -55,7 +57,9 @@ assert.strictEqual(reasonOf('轻舟智航科技'), '本批重复公司')
 assert.strictEqual(reasonOf('储备公司'), '储备/管培岗')
 assert.strictEqual(reasonOf('兼职公司'), '时薪/日薪岗')
 assert.strictEqual(reasonOf('已投公司'), '台账已投')
-assert(filterCards([{title:'AI销售VP',co:'X',salary:'45-75K',tags:[],url:'https://www.zhipin.com/job_detail/z.html'}]).keep.length === 0)  // 销售岗（默认规则）
+assert(filterCards([{title:'AI销售VP',co:'X',salary:'45-75K',tags:[],url:'https://www.zhipin.com/job_detail/z.html'}], { rules }).keep.length === 0)  // 销售岗（示例 profile 的 rejectTitles）
+assert(filterCards([{title:'AI销售VP',co:'X',salary:'45-75K',tags:[],url:'https://www.zhipin.com/job_detail/z.html'}]).keep.length === 1)  // 默认无岗位红线：销售也能投
+assert(filterCards([{title:'运营实习生',co:'Y',salary:'150元/天',tags:['应届'],url:'https://www.zhipin.com/job_detail/z3.html'}]).keep.length === 1)  // 默认：实习/日薪岗也能投
 assert(filterCards([{title:'AI工程师',co:'深度求索',salary:'45-75K',tags:[],url:'https://www.zhipin.com/job_detail/z2.html'}], { rules }).keep.length === 0) // 黑名单
 assert(filterCards([{title:'AI工程师',co:'深度求索',salary:'45-75K',tags:[],url:'https://www.zhipin.com/job_detail/z2.html'}]).keep.length === 1) // 默认黑名单为空
 // 猎头挂单：默认过滤；excludeHeadhunter=false 放行
@@ -72,40 +76,45 @@ assert(f1.reject.some(r => r.reason.includes('学历要求 硕士/博士')))
 ok('filterCards 全规则')
 
 // ---- evalDetail ----
-assert.deepStrictEqual(evalDetail({}, 'AI Agent开发 30-60K·15薪', '负责AI Agent平台开发，Python/Java').pass, true)
-assert.deepStrictEqual(evalDetail({}, '职位已关闭', 'xx').pass, false)
-assert.deepStrictEqual(evalDetail({}, 'AI开发 20-28K', 'AI Agent 平台').pass, false)   // Max28<30
-assert.deepStrictEqual(evalDetail({ title: '测试开发工程师' }, '测试 30-60K', 'AI测试平台 Python', rules).pass, false)   // example profile 追加了测试岗
-assert.deepStrictEqual(evalDetail({ title: '测试开发工程师' }, '测试 30-60K', 'AI测试平台 Python').pass, true)           // 默认不拦
-assert.deepStrictEqual(evalDetail({}, '后端 30-60K', '精通 C++ 与底层引擎').pass, false)      // C++ 红线
-assert.deepStrictEqual(evalDetail({}, '后端 30-60K', 'Python 为主，AI Agent 平台，了解 C++ 加分').pass, true) // 加分项不淘汰
-assert.deepStrictEqual(evalDetail({}, '后端 30-60K', 'Java SpringBoot 微服务高并发架构').pass, false) // 无AI要素
-assert.deepStrictEqual(evalDetail({}, '后端 30-60K', 'Java SpringBoot 微服务高并发架构', { mustHaveKeywords: [] }).pass, true) // 不限关键词
+const ev = (job, banner, jd, r = rules) => evalDetail(job, banner, jd, r)
+assert.deepStrictEqual(ev({}, 'AI Agent开发 30-60K·15薪', '负责AI Agent平台开发，Python/Java').pass, true)
+assert.deepStrictEqual(ev({}, '职位已关闭', 'xx').pass, false)
+assert.deepStrictEqual(ev({}, 'AI开发 20-28K', 'AI Agent 平台').pass, false)   // Max28<30
+assert.deepStrictEqual(ev({ title: '测试开发工程师' }, '测试 30-60K', 'AI测试平台 Python').pass, false)   // 示例 profile 拦了测试岗
+assert.deepStrictEqual(evalDetail({ title: '测试开发工程师' }, '测试 30-60K', 'AI测试平台 Python').pass, true)   // 默认不拦
+assert.deepStrictEqual(ev({}, '后端 30-60K', '精通 C++ 与底层引擎').pass, false)      // C++ 红线
+assert.deepStrictEqual(ev({}, '后端 30-60K', 'Python 为主，AI Agent 平台，了解 C++ 加分').pass, true) // 加分项不淘汰
+assert.deepStrictEqual(ev({}, '后端 30-60K', 'Java SpringBoot 微服务高并发架构').pass, false) // 无AI要素
+assert.deepStrictEqual(ev({}, '后端 30-60K', 'Java SpringBoot 微服务高并发架构', { ...rules, mustHaveKeywords: [] }).pass, true) // 不限关键词
+// 默认规则（全不限）：面议 / 解析不出薪资 / 日薪 都放行，salary 字段照实记
+assert.deepStrictEqual(evalDetail({}, '销售顾问 薪资面议', '负责区域销售'), { pass: true, reason: '规则通过', salary: '面议' })
+assert.deepStrictEqual(evalDetail({}, '运营实习生 150元/天', '协助运营').pass, true)
+assert.deepStrictEqual(evalDetail({}, '客服 4-6K', '客服').salary, '4-6K')
 ok('evalDetail 规则')
 
 // ---- 2026-09-16 review 回归：正则误判 ----
-assert.strictEqual(evalDetail({}, 'AI 30-60K', '负责 AI Agent，部署在 Google Cloud').pass, true)            // Go 不能命中 Google
-assert.strictEqual(evalDetail({}, '后端 30-60K', '要求 Golang 服务端开发').reason, '主语言要求 Go')
-assert.strictEqual(evalDetail({}, '后端 30-60K', '精通 Rust 网络编程').reason, '主语言要求 Rust')
-assert.strictEqual(evalDetail({}, '后端 30-60K', 'AI Agent 平台，Trust & Safety').pass, true)                  // Rust 不能命中 Trust
-assert.strictEqual(evalDetail({}, '后端 30-60K', '精通PHP，负责核心开发。有AI Agent经验优先').reason, '主语言要求 PHP') // 豁免只看本句
-assert.strictEqual(evalDetail({}, '后端 30-60K', '精通 Go 者优先，AI Agent 平台').pass, true)                   // 本句豁免
-assert.strictEqual(evalDetail({}, '后端 30-60K', 'Java 微服务, maintain legacy system, email 通知').reason, 'JD 未命中必含关键词') // ai 不能命中 maintain
-assert.strictEqual(evalDetail({}, '后端 30-60K', '构建 Agentic 系统').pass, true)
-assert.strictEqual(evalDetail({}, 'AI工程师 30K-60K', 'AI Agent').pass, true)                                   // 30K-60K 格式
-assert.strictEqual(evalDetail({}, 'AI工程师 薪资面议', 'AI Agent').reason, '薪资面议')
-assert.strictEqual(evalDetail({}, '职位已关闭', 'x').toLedger, false)                                           // 岗位级淘汰不进台账
-assert.strictEqual(evalDetail({}, 'AI开发 20-28K', 'AI Agent').toLedger, true)
+assert.strictEqual(ev({}, 'AI 30-60K', '负责 AI Agent，部署在 Google Cloud').pass, true)            // Go 不能命中 Google
+assert.strictEqual(ev({}, '后端 30-60K', '要求 Golang 服务端开发').reason, '主语言要求 Go')
+assert.strictEqual(ev({}, '后端 30-60K', '精通 Rust 网络编程').reason, '主语言要求 Rust')
+assert.strictEqual(ev({}, '后端 30-60K', 'AI Agent 平台，Trust & Safety').pass, true)                  // Rust 不能命中 Trust
+assert.strictEqual(ev({}, '后端 30-60K', '精通PHP，负责核心开发。有AI Agent经验优先').reason, '主语言要求 PHP') // 豁免只看本句
+assert.strictEqual(ev({}, '后端 30-60K', '精通 Go 者优先，AI Agent 平台').pass, true)                   // 本句豁免
+assert.strictEqual(ev({}, '后端 30-60K', 'Java 微服务, maintain legacy system, email 通知').reason, 'JD 未命中必含关键词') // ai 不能命中 maintain
+assert.strictEqual(ev({}, '后端 30-60K', '构建 Agentic 系统').pass, true)
+assert.strictEqual(ev({}, 'AI工程师 30K-60K', 'AI Agent').pass, true)                                   // 30K-60K 格式
+assert.strictEqual(ev({}, 'AI工程师 薪资面议', 'AI Agent').reason, '薪资面议')
+assert.strictEqual(ev({}, '职位已关闭', 'x').toLedger, false)                                           // 岗位级淘汰不进台账
+assert.strictEqual(ev({}, 'AI开发 20-28K', 'AI Agent').toLedger, true)
 ok('evalDetail review 回归（Go/Google、豁免范围、AI 边界、薪资格式、toLedger）')
 // 外包：其余规则全过 → review；本身就不过的 → 正常淘汰
-const oc = evalDetail({ co: '某人力资源服务', title: 'AI Agent 工程师' }, 'AI 30-60K', 'AI Agent 平台，驻场客户现场')
+const oc = ev({ co: '某人力资源服务', title: 'AI Agent 工程师' }, 'AI 30-60K', 'AI Agent 平台，驻场客户现场')
 assert.strictEqual(oc.pass, false); assert.strictEqual(oc.review, true); assert.strictEqual(oc.toLedger, false)
-assert.strictEqual(evalDetail({ co: 'X', title: 'AI外包工程师' }, 'AI 20-25K', 'AI Agent').review, undefined)
-assert.strictEqual(evalDetail({ co: '某人力资源服务', title: 'AI Agent 工程师' }, 'AI 30-60K', 'AI Agent 平台，驻场', { outsourcing: 'reject' }).reason, '外包岗位')
-assert.strictEqual(evalDetail({ co: '某人力资源服务', title: 'AI Agent 工程师' }, 'AI 30-60K', 'AI Agent 平台，驻场', { outsourcing: 'allow' }).pass, true)
+assert.strictEqual(ev({ co: 'X', title: 'AI外包工程师' }, 'AI 20-25K', 'AI Agent').review, undefined)
+assert.strictEqual(ev({ co: '某人力资源服务', title: 'AI Agent 工程师' }, 'AI 30-60K', 'AI Agent 平台，驻场', { ...rules, outsourcing: 'reject' }).reason, '外包岗位')
+assert.strictEqual(ev({ co: '某人力资源服务', title: 'AI Agent 工程师' }, 'AI 30-60K', 'AI Agent 平台，驻场', { ...rules, outsourcing: 'allow' }).pass, true)
 ok('外包岗 → review 不淘汰 / reject / allow')
-assert.strictEqual(evalDetail({}, 'AI 30-60K 硕士优先', 'AI Agent').pass, true)
-assert.strictEqual(evalDetail({}, 'AI 30-60K 硕士', 'AI Agent').reason, '学历要求 硕士/博士')
+assert.strictEqual(ev({}, 'AI 30-60K 硕士优先', 'AI Agent').pass, true)
+assert.strictEqual(ev({}, 'AI 30-60K 硕士', 'AI Agent').reason, '学历要求 硕士/博士')
 ok('详情页 硕士优先 豁免')
 
 // ---- sameCompany / kwHit ----
@@ -127,6 +136,7 @@ ok('sameCompany 短名保护 + kwHit 整词')
 const card = (co, title) => ({ title, co, salary: '30-50K', tags: [], url: 'https://www.zhipin.com/job_detail/' + Math.random().toString(36).slice(2) + '.html' })
 const rs = (co, title) => filterCards([card(co, title)], { rules }).reject.map(r => r.reason)[0]
 assert.strictEqual(rs('A', 'AI Agent 产品经理'), '岗位类型不匹配')
+assert.strictEqual(filterCards([card('A', 'AI Agent 产品经理')]).reject.length, 0)   // 默认不拦：产品经理自己也能用
 assert.strictEqual(rs('A', 'AI大模型测试平台开发工程师'), '岗位类型不匹配')
 assert.strictEqual(rs('A', 'Agent 爬虫后端开发（Go）'), '标题主语言 Go/C++/Rust/PHP/C#')
 assert.strictEqual(rs('A', 'AI Agent 工程师（Java 方向）'), undefined)   // Java 不拦
@@ -134,7 +144,7 @@ assert.strictEqual(rs('知名公司', 'AI 工程师'), '猎头挂单(默认过�
 assert.strictEqual(rs('北京锐仕方达铂鸿人力', 'AI 工程师'), '猎头挂单(默认过滤)')
 assert.strictEqual(rs('神舟人力', 'AI 工程师'), '猎头挂单(默认过滤)')
 assert.strictEqual(rs('德勤', 'AI 工程师'), undefined)
-assert.strictEqual(evalDetail({ title: 'AI 讲师' }, 'AI 30-60K', 'AI Agent', rules).reason, '岗位类型不匹配:AI 讲师')
+assert.strictEqual(ev({ title: 'AI 讲师' }, 'AI 30-60K', 'AI Agent').reason, '岗位类型不匹配:AI 讲师')
 ok('卡级岗位类型/标题语言/无某猎头')
 
 // ---- makeHook：按优先级取第一个命中；同一 hook 可被多岗复用（不再要求跨岗唯一）----
@@ -159,34 +169,37 @@ const PUA = (digits) => [...digits].map(d => String.fromCodePoint(0xE031 + Numbe
 assert.strictEqual(decodeSalaryFont(PUA('30') + '-' + PUA('50') + 'K·' + PUA('15') + '薪'), '30-50K·15薪')
 assert.strictEqual(decodeSalaryFont('面议'), '面议')
 const lowCard = { title: 'AI Agent', co: '低薪打码', salary: PUA('15') + '-' + PUA('25') + 'K', tags: [], url: 'https://www.zhipin.com/job_detail/p1.html' }
-assert.strictEqual(filterCards([lowCard]).keep.length, 1)                          // 不解码：打码留细筛
-assert.strictEqual(filterCards([lowCard], { decodeSalary: true }).keep.length, 0)  // 解码后卡级直接淘汰
-assert.strictEqual(filterCards([lowCard], { decodeSalary: true }).reject[0].reason, '卡片薪资Max 25K<30K')
+assert.strictEqual(filterCards([lowCard], { rules }).keep.length, 1)                          // 不解码：打码留细筛
+assert.strictEqual(filterCards([lowCard], { rules, decodeSalary: true }).keep.length, 0)  // 解码后卡级直接淘汰
+assert.strictEqual(filterCards([lowCard], { rules, decodeSalary: true }).reject[0].reason, '卡片薪资Max 25K<30K')
 const okCard = { ...lowCard, co: '高薪打码', salary: PUA('30') + '-' + PUA('60') + 'K' }
-assert.strictEqual(filterCards([okCard], { decodeSalary: true }).keep[0].salary, '30-60K')     // shortlist 里存解码后的
-assert.strictEqual(listUrl('AI Agent'), 'https://www.zhipin.com/web/geek/jobs?city=101010100&query=AI%20Agent&salary=406,407&experience=105,106,107')
-assert.strictEqual(listUrl('x', { city: '101020100', salaryCodes: [407], experienceCodes: [] }), 'https://www.zhipin.com/web/geek/jobs?city=101020100&query=x&salary=407')
+assert.strictEqual(filterCards([okCard], { rules, decodeSalary: true }).keep[0].salary, '30-60K')     // shortlist 里存解码后的
+assert.strictEqual(listUrl('AI Agent', '101010100', profile.search), 'https://www.zhipin.com/web/geek/jobs?city=101010100&query=AI%20Agent&salary=406,407&experience=105,106,107')
+assert.strictEqual(listUrl('x', '101020100', { salaryCodes: [407], experienceCodes: [] }), 'https://www.zhipin.com/web/geek/jobs?city=101020100&query=x&salary=407')
+assert.strictEqual(listUrl('销售', '101280600'), 'https://www.zhipin.com/web/geek/jobs?city=101280600&query=%E9%94%80%E5%94%AE')   // 默认：无任何服务端筛选
 ok('decodeSalaryFont + listUrl')
 
 // ---- profile：默认合并 / 薪资码派生 / 校验 ----
 assert.deepStrictEqual(salaryCodesFor(30), [406, 407])
 assert.deepStrictEqual(salaryCodesFor(15), [405, 406, 407])
 assert.deepStrictEqual(salaryCodesFor(0), [])
-const np = normalizeProfile({ candidate: { intro: 'x', links: [{ label: 'G', url: 'https://g.com/a' }] }, rules: { minSalaryK: 15, blockCompanies: ['甲'] } })
+const np = normalizeProfile({ candidate: { intro: 'x', links: [{ label: 'G', url: 'https://g.com/a' }] }, search: { cities: ['北京', '101280600', '三亚'], queries: ['销售'] }, rules: { minSalaryK: 15, blockCompanies: ['甲'] } })
 assert.deepStrictEqual(np.search.salaryCodes, [405, 406, 407])
+assert.deepStrictEqual(np.search.cityCodes, ['101010100', '101280600', '101310200'])   // 城市名/码混填都能解析
 assert.strictEqual(np.rules.headhunter, 'reject')                 // 默认值补齐
-assert.strictEqual(np.rules.allRejectTitles.length, 4)                // 固定 4 条
-const np2 = normalizeProfile({ ...np, rules: { ...np.rules, extraRejectTitles: [{ pattern: '数据分析', reason: '数据分析岗' }] } })
-assert.strictEqual(np2.rules.allRejectTitles.length, 5)               // 追加不覆盖
+assert.deepStrictEqual(np.rules.rejectTitles, [])                 // 默认无岗位红线
+const np2 = normalizeProfile({ ...np, rules: { ...np.rules, rejectTitles: [{ pattern: '数据分析', reason: '数据分析岗' }] } })
 assert.strictEqual(filterCards([{ title: 'AI数据分析师', co: 'A', salary: '30-50K', tags: [], url: 'https://www.zhipin.com/job_detail/t1.html' }], { rules: np2.rules }).reject[0].reason, '数据分析岗')
-assert.strictEqual(filterCards([{ title: 'AI实习生', co: 'A', salary: '30-50K', tags: [], url: 'https://www.zhipin.com/job_detail/t2.html' }], { rules: np2.rules }).reject[0].reason, '实习/校招/应届')  // 基础条仍在
-assert.strictEqual(filterCards([{ title: 'AI 产品经理', co: 'A', salary: '30-50K', tags: [], url: 'https://www.zhipin.com/job_detail/t3.html' }], { rules: np2.rules }).keep.length, 1)  // 没追加就不拦产品
-assert(validateProfile(normalizeProfile({ ...np, rules: { ...np.rules, rejectTitles: [] } })).errors.some(e => /extraRejectTitles/.test(e)))  // 旧字段名报错
+assert.strictEqual(filterCards([{ title: 'AI实习生', co: 'A', salary: '30-50K', tags: [], url: 'https://www.zhipin.com/job_detail/t2.html' }], { rules: np2.rules }).keep.length, 1)  // 没写就不拦实习
+assert(validateProfile(normalizeProfile({ ...np, rules: { ...np.rules, extraRejectTitles: [] } })).errors.some(e => /rejectTitles/.test(e)))  // 旧字段名报错
 assert.strictEqual(validateProfile(np).ok, true)
+assert.strictEqual(validateProfile(normalizeProfile({ candidate: { intro: '应届生，会剪辑' }, search: { cities: ['成都'], queries: ['运营实习'] } })).ok, true)  // 最小可用：没链接没 hook 没规则
 assert(validateProfile(normalizeProfile({})).errors.some(e => /candidate.intro/.test(e)))
-assert(validateProfile(normalizeProfile({ candidate: { intro: 'x', links: [] } })).errors.some(e => /candidate.links/.test(e)))
+assert(validateProfile(normalizeProfile({ candidate: { intro: 'x', links: [{ label: 'G', url: 'g.com' }] } })).errors.some(e => /candidate.links/.test(e)))   // 链接格式错才报
 assert(validateProfile(normalizeProfile({ ...np, rules: { ...np.rules, outsourcing: 'maybe' } })).errors.some(e => /outsourcing/.test(e)))
-assert(validateProfile(normalizeProfile({ ...np, search: { ...np.search, city: '北京' } })).errors.some(e => /city/.test(e)))
+assert(validateProfile(normalizeProfile({ ...np, search: { ...np.search, cities: ['火星'] } })).errors.some(e => /认不出「火星」/.test(e)))
+assert(validateProfile(normalizeProfile({ ...np, search: { queries: ['x'] } })).errors.some(e => /search.cities/.test(e)))
+assert(validateProfile(normalizeProfile({ ...np, search: { city: '101010100', cities: ['北京'], queries: ['x'] } })).errors.some(e => /search.city 已改为/.test(e)))
 // 规则真的生效：minSalaryK=15 时 20-25K 过；rejectLanguages=[] 时 C++ 不拦
 assert.strictEqual(filterCards([{ title: 'AI', co: 'A', salary: '20-25K', tags: [], url: 'https://www.zhipin.com/job_detail/r1.html' }], { rules: np.rules }).keep.length, 1)
 assert.strictEqual(evalDetail({}, '后端 30-60K', '精通 C++ 与底层引擎，AI Agent', { rejectLanguages: [] }).pass, true)
@@ -283,6 +296,22 @@ async function testScreenLoop() {
   assert.strictEqual(rv.decision, 'SKIPPED')
   assert.strictEqual((await pipe.sendReviewed(runDir, '不存在公司')).decision, 'FAILED')
   ok('screenLoop decision 映射 + 断点重试语义 + 详情页未加载不淘汰')
+
+  // 边界：没先 discover
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'pipeloop-'))
+  const r0 = await pipe.screenLoop(empty, null, {})
+  assert.strictEqual(r0.ok, false); assert(/discover/.test(r0.error))
+  // 边界：连续失败熔断（全部详情页加载不出）
+  const dead = fs.mkdtempSync(path.join(os.tmpdir(), 'pipeloop-'))
+  fs.writeFileSync(path.join(dead, 'shortlist.json'), JSON.stringify({ keep: [1, 2, 3, 4, 5].map(i => ({ co: '死公司' + i, title: 'T', url: 'https://www.zhipin.com/job_detail/x' + i + '.html' })) }))
+  const hDead = { ...h, gotoAndWait: async () => {}, js: async (expr) => (expr.includes('.job-banner') ? null : '') }
+  const rd = await makePipeline(hDead, profile).screenLoop(dead, null, {})
+  assert.strictEqual(rd.stop, 'consecutive-failures'); assert.strictEqual(rd.ok, false); assert.strictEqual(rd.tried, 3); assert.strictEqual(rd.remaining, 2)
+  // 边界：风控页 → 立即停，带 phase
+  const hRisk = { ...hDead, js: async (expr) => (expr.includes('.job-banner') ? null : expr.includes('risk-control') ? 'risk-control' : '') }
+  const rr = await makePipeline(hRisk, profile).screenLoop(dead, null, {})
+  assert.strictEqual(rr.stop, 'risk-control'); assert.strictEqual(rr.tried, 1)
+  ok('screenLoop 边界：未 discover / 连续失败熔断 / 风控即停')
 }
 
 // ---- discover：mock page，测滚动/合并去重/字体校验分支 ----
@@ -310,9 +339,12 @@ async function testDiscover(fontOk) {
   const pipe = makePipeline(h, profile)
   const r = await pipe.discover(runDir, page, ['Agent', '智能体'], { stableRounds: 2, maxRounds: 10 })
   assert.strictEqual(r.ok, true, JSON.stringify(r))
-  assert(gotoUrls[0].includes('query=Agent&salary=406,407&experience=105,106,107'), '列表 URL 带服务端筛选')
+  assert(gotoUrls[0].includes('city=101010100&query=Agent&salary=406,407&experience=105,106,107'), '列表 URL 带服务端筛选')
+  assert.strictEqual(gotoUrls.filter(u => u.includes('/web/geek/jobs')).length, 4, '2 城市 × 2 词 = 4 个列表页')
+  assert(gotoUrls.some(u => u.includes('city=101210100')), '第二个城市也搜了')
+  assert.strictEqual(r.results.length, 4)
   assert.strictEqual(gotoUrls.filter(u => u.includes('job_detail')).length, 1, '只开 1 个详情页校验字体')
-  assert.strictEqual(r.poolUnique, 3, '双查询同卡按 url 去重')
+  assert.strictEqual(r.poolUnique, 3, '多城市多查询同卡按 url 去重')
   assert.strictEqual(r.salaryFont.verified, fontOk, JSON.stringify(r.salaryFont))
   const sl = JSON.parse(fs.readFileSync(path.join(runDir, 'shortlist.json'), 'utf8'))
   if (fontOk) assert.deepStrictEqual(sl.keep.map(k => k.co), ['公司1', '公司3'])          // 解码：15-25K 卡级淘汰
@@ -320,4 +352,23 @@ async function testDiscover(fontOk) {
   ok('discover 服务端筛选 + 字体校验 ' + (fontOk ? '通过' : '失败退回'))
 }
 
-testDiscover(true).then(() => testDiscover(false)).then(testScreenLoop).then(() => console.log('\nALL', n, 'ASSERTS PASSED')).catch(e => { console.error(e); process.exit(1) })
+// discover 边界：风控页 / 游客态 / 薪资不限时不开详情页校验字体
+async function testDiscoverEdges() {
+  const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pipedisc-'))
+  const page = { goto: async () => {}, waitForLoadState: async () => {}, cdp: async () => {} }
+  const base = { wait: async () => {}, click: async () => {}, pageInfo: async () => ({ url: '' }), gotoAndWait: async () => {} }
+  const r1 = await makePipeline({ ...base, js: async (expr) => (expr.includes('risk-control') ? 'risk-control' : true) }, profile).discover(runDir, page)
+  assert.strictEqual(r1.ok, false); assert.strictEqual(r1.phase, 'risk-control')
+  const r2 = await makePipeline({ ...base, js: async (expr) => (expr.includes('risk-control') ? null : expr.includes('hasUser') ? false : '') }, profile).discover(runDir, page)
+  assert.strictEqual(r2.ok, false); assert.strictEqual(r2.phase, 'login')
+  const r3 = await makePipeline(base, { ...profile, search: { cities: [], queries: ['x'] } }).discover(runDir, page)
+  assert.strictEqual(r3.phase, 'config')
+  let detailOpened = 0
+  const hFree = { ...base, gotoAndWait: async () => { detailOpened++ }, js: async (expr) => (expr.includes('risk-control') ? null : expr.includes('hasUser') ? true : expr.includes('.length') ? 1 : expr.includes('job-card-box') ? [{ title: '实习', co: 'A', salary: PUA('1') + '-' + PUA('2') + 'K', tags: [], url: 'https://www.zhipin.com/job_detail/f.html' }] : '') }
+  // 全默认规则（不限薪资、无红线）：实习+打码低薪卡也保留
+  const r4 = await makePipeline(hFree, { candidate: profile.candidate, search: profile.search }).discover(runDir, page, ['x'], { stableRounds: 1, maxRounds: 2 })
+  assert.strictEqual(r4.ok, true); assert.strictEqual(detailOpened, 0, '薪资不限不用解码，不开详情页'); assert.strictEqual(r4.kept, 1)
+  ok('discover 边界：风控 / 游客态 / 配置缺失 / 薪资不限跳过字体校验')
+}
+
+testDiscover(true).then(() => testDiscover(false)).then(testDiscoverEdges).then(testScreenLoop).then(() => console.log('\nALL', n, 'ASSERTS PASSED')).catch(e => { console.error(e); process.exit(1) })

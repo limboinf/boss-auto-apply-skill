@@ -67,7 +67,10 @@
     }
   ],
   "search": {
-    "city": "101010100",
+    "cities": [
+      "北京",
+      "杭州"
+    ],
     "queries": [
       "Agent",
       "AI Agent",
@@ -97,7 +100,19 @@
       "硕士",
       "博士"
     ],
-    "extraRejectTitles": [
+    "rejectTitles": [
+      {
+        "pattern": "实习|校招|应届",
+        "reason": "实习/校招"
+      },
+      {
+        "pattern": "储备|管培",
+        "reason": "储备/管培岗"
+      },
+      {
+        "pattern": "销售|电销|客服",
+        "reason": "销售/客服岗"
+      },
       {
         "pattern": "产品经理|测试开发|测试工程师|测试平台|运维工程师|讲师",
         "reason": "岗位类型不匹配"

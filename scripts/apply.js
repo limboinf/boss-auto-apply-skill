@@ -34,6 +34,7 @@ function makeLib(h, profileArg) {
     const links = (profile.candidate.links || []).map(l => l.label + '：' + l.url).join('\n')
     return String(profile.message.template)
       .replace('{title}', title).replace('{intro}', profile.candidate.intro || '').replace('{hook}', hook).replace('{links}', links)
+      .trim()   // 没有链接时 {links} 为空，别留尾部空行
   }
 
   // 发送：真实点击 + 坐标兜底 + 元素点击再兜底（js click 已失效）

@@ -10,7 +10,7 @@
 const fs = require('fs')
 const pathMod = require('path')
 const makeApplyLib = require('./apply.js')
-const { DEFAULTS: PROFILE_DEFAULTS, BASE_REJECT_TITLES, normalizeProfile, dataDir } = require('./profile.js')
+const { DEFAULTS: PROFILE_DEFAULTS, normalizeProfile, dataDir, cityLabel } = require('./profile.js')
 
 function ledgerPath() {
   return pathMod.join(dataDir(), 'applied-ledger.json')
@@ -54,10 +54,9 @@ function langSource(label) {
 }
 const titleLangRe = (langs) => langs.length ? new RegExp('(' + langs.map(langSource).join('|') + ')') : null
 
-// 岗位标题/标签红线：固定 4 条 + profile.rules.extraRejectTitles + rejectLanguages（标题带 Go/C++ 之类直接淘汰）
+// 岗位标题/标签红线：profile.rules.rejectTitles + rejectLanguages（标题带 Go/C++ 之类直接淘汰）。没有任何内置红线。
 function titleRules(rules) {
-  const all = rules.allRejectTitles || [...BASE_REJECT_TITLES, ...(rules.extraRejectTitles || [])]
-  const list = all.map(t => [new RegExp(t.pattern), t.reason])
+  const list = (rules.rejectTitles || []).map(t => [new RegExp(t.pattern), t.reason])
   const lr = titleLangRe(rules.rejectLanguages)
   if (lr) list.push([lr, '标题主语言 ' + rules.rejectLanguages.join('/')])
   return list
@@ -74,9 +73,10 @@ function sameCompany(a, b) {
   return x.includes(y) || y.includes(x)
 }
 
-// 卡级粗筛：薪资可解析则 Max>=minK；打码('-K·薪')保留待细筛；面议/无法解析淘汰。
+// 卡级粗筛：minK=0 一律保留；否则薪资可解析则 Max>=minK；打码('-K·薪')保留待细筛；面议/时薪/日薪/无法解析淘汰。
 function cardSalaryVerdict(salaryText, minK = DEFAULT_RULES.minSalaryK) {
   const s = String(salaryText || '').trim()
+  if (!minK) return { keep: true, reason: '薪资不限' }
   if (!s) return { keep: false, reason: '卡片无薪资' }
   if (/面议/.test(s)) return { keep: false, reason: '薪资面议' }
   if (/元\/(时|天|日)/.test(s)) return { keep: false, reason: '时薪/日薪岗' }
@@ -98,11 +98,11 @@ function cardSalaryVerdict(salaryText, minK = DEFAULT_RULES.minSalaryK) {
   return { keep: false, reason: '薪资无法解析:' + s }
 }
 
-// 列表页 URL：城市 + 关键词 + 服务端筛选（薪资码由 minSalaryK 派生，经验码来自 profile）
-function listUrl(query, search = PROFILE_DEFAULTS.search) {
+// 列表页 URL：城市码 + 关键词 + 服务端筛选（薪资码由 minSalaryK 派生，经验码来自 profile）
+function listUrl(query, cityCode, search = PROFILE_DEFAULTS.search) {
   const s = normalizeProfile({ search }).search
   // 逗号不编码：BOSS 实测认 salary=406,407 这种裸逗号
-  let url = 'https://www.zhipin.com/web/geek/jobs?city=' + s.city + '&query=' + encodeURIComponent(query)
+  let url = 'https://www.zhipin.com/web/geek/jobs?city=' + cityCode + '&query=' + encodeURIComponent(query)
   if (s.salaryCodes && s.salaryCodes.length) url += '&salary=' + s.salaryCodes.join(',')
   if (s.experienceCodes && s.experienceCodes.length) url += '&experience=' + s.experienceCodes.join(',')
   return url
@@ -191,12 +191,15 @@ function evalDetail(job, bannerText, jdText, rulesArg) {
   const banner = String(bannerText || '')
   const jd = String(jdText || '')
   if (/职位已关闭|已停止招聘/.test(banner)) return { pass: false, reason: '职位已关闭', toLedger: false }
-  if (/面议/.test(banner)) return { pass: false, reason: '薪资面议', toLedger: true }
   const m = SALARY_RE.exec(banner)
-  if (!m) return { pass: false, reason: '详情薪资无法解析:' + banner.slice(0, 40), toLedger: false }
-  const max = Number(m[2])
-  const fail = (reason) => ({ pass: false, reason, salary: m[0], toLedger: true })
-  if (max < rules.minSalaryK) return fail('Max ' + max + 'K<' + rules.minSalaryK + 'K')
+  const salary = m ? m[0] : (/面议/.test(banner) ? '面议' : null)
+  const fail = (reason) => ({ pass: false, reason, salary, toLedger: true })
+  // 薪资线：只有 minSalaryK>0 才管薪资；0 = 面议/日薪/时薪/解析不出都放行
+  if (rules.minSalaryK) {
+    if (salary === '面议') return fail('薪资面议')
+    if (!m) return { pass: false, reason: '详情薪资无法解析:' + banner.slice(0, 40), toLedger: false }
+    if (Number(m[2]) < rules.minSalaryK) return fail('Max ' + m[2] + 'K<' + rules.minSalaryK + 'K')
+  }
   if (hardEduRequired(banner, rules.rejectDegrees)) return fail('学历要求 ' + rules.rejectDegrees.join('/'))
   const lang = langRedLine(jd, rules.rejectLanguages)
   if (lang) return fail('主语言要求 ' + lang)
@@ -205,9 +208,9 @@ function evalDetail(job, bannerText, jdText, rulesArg) {
   if (rules.mustHaveKeywords.length && !rules.mustHaveKeywords.some(k => kwHit(jd, k))) return fail('JD 未命中必含关键词')
   if (rules.outsourcing !== 'allow' && OUTSOURCING_RE.test(String(job.co) + '|' + String(job.title) + '|' + banner + '|' + jd)) {
     if (rules.outsourcing === 'reject') return fail('外包岗位')
-    return { pass: false, reason: '外包岗位待判断', salary: m[0], toLedger: false, review: true }
+    return { pass: false, reason: '外包岗位待判断', salary, toLedger: false, review: true }
   }
-  return { pass: true, reason: 'Max' + max + 'K+画像匹配', salary: m[0] }
+  return { pass: true, reason: (m ? 'Max' + m[2] + 'K+' : '') + '规则通过', salary }
 }
 
 // 关键词命中：拉丁词整词匹配（Java 不命中 JavaScript、Web 不命中 WebSocket），允许复数；中文子串匹配
@@ -302,58 +305,84 @@ function makePipeline(h, profileArg) {
 
   const readJson = (p, dflt) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch (e) { return dflt } }
 
+  // 页面级异常识别（登录/风控），粗筛每次开列表页、细筛每次开详情页都过一遍。
+  //   login：游客态（顶栏有登录/注册、无头像）
+  //   risk-control：BOSS 安全验证/滑块/访问异常页——继续跑只会把账号越搞越糟，必须停下交人
+  async function pageBlocked() {
+    return h.js(String.raw`(() => {
+      const text = (document.body && document.body.innerText || '').slice(0, 3000)
+      if (/安全验证|请完成验证|访问异常|操作频繁|账号异常|异常访问/.test(text) || /security|verify|captcha/i.test(location.pathname)) return 'risk-control'
+      if (/\/web\/user\/\?ka=|\/login/.test(location.href)) return 'login'
+      return null
+    })()`)
+  }
+  async function listPageBlocked() {
+    const blocked = await pageBlocked()
+    if (blocked) return blocked
+    // 登录预检：有头像节点 且 顶栏没有「登录/注册」入口（游客态页面也可能有 avatar 类名，不能只看类名）
+    const loginOk = await h.js(String.raw`(() => {
+      const hasUser = !!document.querySelector('.nav-figure, .user-info')
+      const nav = document.querySelector('.user-nav, .nav-header, header')
+      const guest = nav ? /登录|注册/.test(nav.innerText || '') : false
+      return hasUser && !guest
+    })()`)
+    return loginOk ? null : 'login'
+  }
+  const BLOCK_MSG = { login: '登录态失效/游客态：停止，交 handOff 让用户扫码', 'risk-control': 'BOSS 安全验证/风控页：立即停止，让用户手动处理，今天不要再跑' }
+
   // ---------- 粗筛：滚动记录 ----------
-  // 逐查询滚动至平台期（连续 stableRounds 轮卡数不增）或 maxRounds 上限；全量落盘 pool-<q>.json。
+  // 城市 × 关键词 逐个滚动至平台期（连续 stableRounds 轮卡数不增）或 maxRounds 上限；全量落盘 pool-<城市>-<词>.json。
   // 不发任何消息；唯一会开的详情页是 1 个用来校验薪资字体映射的（opts.verifySalaryFont=false 关掉）。
-  // 列表 URL 带服务端筛选（薪资码由 rules.minSalaryK 派生 + search.experienceCodes），在列表页就把低薪和初级岗砍掉，
-  //   实测 6 轮 45 卡里 80% Max≥30K（无过滤时细筛 37% 白开详情页）。
-  // queries 缺省 profile.search.queries；maxRounds 缺省 profile.search.maxRounds。
+  // 列表 URL 带服务端筛选（薪资码由 rules.minSalaryK 派生 + search.experienceCodes），在列表页就把不合要求的砍掉。
+  // queries 缺省 profile.search.queries；cities 缺省 profile.search.cityCodes；maxRounds 缺省 profile.search.maxRounds。
   async function discover(runDir, page, queries, opts = {}) {
     queries = queries && queries.length ? queries : profile.search.queries
+    const cities = opts.cities && opts.cities.length ? opts.cities : profile.search.cityCodes
+    if (!cities.length || !queries.length) return { ok: false, phase: 'config', error: 'profile.search.cities / queries 为空，先补 profile' }
     const maxRounds = opts.maxRounds || profile.search.maxRounds
     const stableRounds = opts.stableRounds || 6
     const results = []
-    for (const q of queries) {
-      const url = listUrl(q, profile.search)
-      await page.goto(url)
-      await page.waitForLoadState()
-      await h.wait(2)
-      // 登录预检：有头像节点 且 顶栏没有「登录/注册」入口（游客态页面也可能有 avatar 类名，不能只看类名）
-      const loginOk = await h.js(String.raw`(() => {
-        const hasUser = !!document.querySelector('.nav-figure, .user-info')
-        const nav = document.querySelector('.user-nav, .nav-header, header')
-        const guest = nav ? /登录|注册/.test(nav.innerText || '') : false
-        return hasUser && !guest
-      })()`)
-      if (!loginOk) return { ok: false, phase: 'login', error: '登录态失效/游客态：停止粗筛，交 handOff' }
-      let rounds = 0, prev = 0, stable = 0
-      for (let i = 0; i < maxRounds; i++) {
-        await page.cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 500, y: 500, deltaX: 0, deltaY: 900, pointerType: 'mouse' })
-        await h.wait(1.2)
-        rounds++
-        const n = await h.js(String.raw`(() => document.querySelectorAll('li.job-card-box').length)()`)
-        log(runDir, 'scroll-' + q + '.log', 'round ' + rounds + ' cards ' + n + ' stable ' + stable)
-        if (n > prev) { prev = n; stable = 0 } else { stable++ }
-        if (stable >= stableRounds) break
+    const poolFiles = []
+    for (const city of cities) {
+      for (const q of queries) {
+        const url = listUrl(q, city, profile.search)
+        await page.goto(url)
+        await page.waitForLoadState()
+        await h.wait(2)
+        const blocked = await listPageBlocked()
+        if (blocked) return { ok: false, phase: blocked, error: BLOCK_MSG[blocked], city: cityLabel(city), query: q, results }
+        let rounds = 0, prev = 0, stable = 0
+        for (let i = 0; i < maxRounds; i++) {
+          await page.cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 500, y: 500, deltaX: 0, deltaY: 900, pointerType: 'mouse' })
+          await h.wait(1.2)
+          rounds++
+          const n = await h.js(String.raw`(() => document.querySelectorAll('li.job-card-box').length)()`)
+          log(runDir, 'scroll-' + cityLabel(city) + '-' + q + '.log', 'round ' + rounds + ' cards ' + n + ' stable ' + stable)
+          if (n > prev) { prev = n; stable = 0 } else { stable++ }
+          if (stable >= stableRounds) break
+        }
+        const cards = await h.js(String.raw`(() => {
+          const cards = [...document.querySelectorAll('li.job-card-box')];
+          return cards.map(c => {
+            const t = (sel) => { const el = c.querySelector(sel); return el ? el.textContent.trim() : '' };
+            const link = c.querySelector('a[href*="job_detail"]');
+            return { title: t('.job-name'), co: t('.boss-name'), salary: t('.job-salary'), tags: [...c.querySelectorAll('.tag-list li')].map(x => x.textContent.trim()), url: link ? link.href : '' };
+          }).filter(x => x.url);
+        })()`)
+        const file = pathMod.join(runDir, 'pool-' + cityLabel(city) + '-' + q + '.json')
+        fs.writeFileSync(file, JSON.stringify({ city: cityLabel(city), query: q, rounds, count: cards.length, candidates: cards.map(c => ({ ...c, city: cityLabel(city) })) }, null, 1))
+        poolFiles.push(file)
+        results.push({ city: cityLabel(city), query: q, rounds, cards: cards.length })
+        log(runDir, 'discover.log', cityLabel(city) + ' ' + q + ' rounds ' + rounds + ' cards ' + cards.length)
       }
-      const cards = await h.js(String.raw`(() => {
-        const cards = [...document.querySelectorAll('li.job-card-box')];
-        return cards.map(c => {
-          const t = (sel) => { const el = c.querySelector(sel); return el ? el.textContent.trim() : '' };
-          const link = c.querySelector('a[href*="job_detail"]');
-          return { title: t('.job-name'), co: t('.boss-name'), salary: t('.job-salary'), tags: [...c.querySelectorAll('.tag-list li')].map(x => x.textContent.trim()), url: link ? link.href : '' };
-        }).filter(x => x.url);
-      })()`)
-      fs.writeFileSync(pathMod.join(runDir, 'pool-' + q + '.json'), JSON.stringify({ query: q, rounds, count: cards.length, candidates: cards }, null, 1))
-      results.push({ query: q, rounds, cards: cards.length })
     }
-    // 合并双查询池 + 卡级粗筛 → shortlist.json
+    // 合并所有池 + 卡级粗筛 → shortlist.json
     const pool = []
-    for (const q of queries) pool.push(...(readJson(pathMod.join(runDir, 'pool-' + q + '.json'), { candidates: [] })).candidates)
+    for (const f of poolFiles) pool.push(...(readJson(f, { candidates: [] })).candidates)
     const seenUrl = new Set()
     const uniq = pool.filter(c => c.url && !seenUrl.has(c.url) && seenUrl.add(c.url))
     const ledger = readJson(ledgerPath(), { applied: [], eliminated: [] })
-    const font = opts.verifySalaryFont === false ? { verified: false, reason: 'skipped' } : await verifySalaryFont(uniq)
+    const font = opts.verifySalaryFont === false || !rules.minSalaryK ? { verified: false, reason: rules.minSalaryK ? 'skipped' : '薪资不限，无需解码' } : await verifySalaryFont(uniq)
     log(runDir, 'discover.log', 'salary-font ' + JSON.stringify(font))
     const f = filterCards(uniq, { rules, appliedCos: ledger.applied, eliminatedCos: ledger.eliminated, decodeSalary: font.verified })
     fs.writeFileSync(pathMod.join(runDir, 'shortlist.json'), JSON.stringify({ at: new Date().toISOString(), search: profile.search, salaryFont: font, kept: f.keep.length, rejected: f.reject.length, keep: f.keep }, null, 1))
@@ -384,8 +413,10 @@ function makePipeline(h, profileArg) {
     // 详情页没渲染出来（验证码/慢网）→ 不判定，记 FAILED 留待重试；拿 body 兜底判定会把公司误写进台账淘汰。
     const banner = await h.js(String.raw`(() => { const b = document.querySelector('.job-banner, .job-title'); return b ? b.innerText.trim() : null })()`)
     if (banner === null || banner === undefined) {
-      appendJsonl(pathMod.join(runDir, 'details.jsonl'), { co: job.co, title: job.title, url: job.url, decision: 'FAILED', reason: '详情页未加载' })
-      return { co: job.co, decision: 'FAILED', reason: '详情页未加载' }
+      const blocked = await pageBlocked()
+      const reason = blocked ? BLOCK_MSG[blocked] : '详情页未加载'
+      appendJsonl(pathMod.join(runDir, 'details.jsonl'), { co: job.co, title: job.title, url: job.url, decision: 'FAILED', reason })
+      return { co: job.co, decision: 'FAILED', reason, blocked }
     }
     const jd = await h.js(String.raw`(() => { const s = document.querySelector('.job-sec-text'); return s ? s.innerText.trim().slice(0, 4000) : '' })()`)
     let verdict = evalDetail(job, banner, jd, rules)
@@ -444,7 +475,9 @@ function makePipeline(h, profileArg) {
     const [ivMin, ivMax] = profile.pacing.sendIntervalS
     const gap = () => Math.max(15, ivMin) + Math.floor(Math.random() * Math.max(0, ivMax - ivMin + 1))   // 下限 15s 写死：防风控不交给配置
     const t0 = Date.now()
-    const shortlist = readJson(pathMod.join(runDir, 'shortlist.json'), { keep: [] }).keep
+    const sl = readJson(pathMod.join(runDir, 'shortlist.json'), null)
+    if (!sl) return { ok: false, phase: 'config', error: 'shortlist.json 不存在：先跑 discover', sent: 0, out: [] }
+    const shortlist = sl.keep
     const details = readDetails(runDir)
     const doneCos = new Set(details.filter(d => TERMINAL_DECISIONS.has(d.decision)).map(d => d.co))
     const hooks = opts.hooks || {}
@@ -454,14 +487,19 @@ function makePipeline(h, profileArg) {
     ]
     const ctx = { hooks }
     const out = []
-    let sent = 0
+    let sent = 0, stop = null, consecutiveFails = 0, tried = 0
+    const MAX_CONSECUTIVE_FAILS = 3   // 连续 3 岗都 FAILED/异常 = 页面结构变了或被风控，继续只会刷更多失败
     for (const job of ranked) {
       if (sent >= maxSend) break
-      if ((Date.now() - t0) / 1000 > budgetS) { out.push({ stop: 'time-budget' }); break }
+      if ((Date.now() - t0) / 1000 > budgetS) { stop = 'time-budget'; break }
       if (doneCos.has(job.co)) continue
+      tried++
       try {
         const r = await screenAndSendOne(runDir, job, ctx, opts)
         out.push(r)
+        if (r.blocked) { stop = r.blocked; break }
+        if (r.decision === 'FAILED') consecutiveFails++
+        else consecutiveFails = 0
         if (r.decision === 'SENT') {
           sent++
           await h.wait(gap()) // 发送间隔，防风控
@@ -469,11 +507,15 @@ function makePipeline(h, profileArg) {
           await h.wait(1.2)
         }
       } catch (e) {
+        consecutiveFails++
         appendJsonl(pathMod.join(runDir, 'details.jsonl'), { co: job.co, title: job.title, url: job.url, decision: 'FAILED', reason: String(e && e.message || e).slice(0, 200) })
         out.push({ co: job.co, decision: 'EXCEPTION', error: String(e && e.message || e).slice(0, 120) })
       }
+      if (consecutiveFails >= MAX_CONSECUTIVE_FAILS) { stop = 'consecutive-failures'; break }
     }
-    return { sent, elapsedS: Math.round((Date.now() - t0) / 1000), out }
+    const remaining = ranked.filter(j => !doneCos.has(j.co)).length - tried
+    // stop：null=正常结束（maxSend 达标或 shortlist 耗尽）| time-budget=续跑 | consecutive-failures / login / risk-control=停下交人
+    return { ok: !stop || stop === 'time-budget', stop, sent, tried, remaining: Math.max(0, remaining), elapsedS: Math.round((Date.now() - t0) / 1000), out }
   }
 
   // agent 判断后对某家外包岗补发：从 details.jsonl 取 NEEDS_REVIEW 记录，放行重跑单岗闭环。

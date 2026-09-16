@@ -7,12 +7,12 @@
 - 当日工作目录：pipeline.runDir('YYYY-MM-DD-AM' 或 'PM')（按当前时段命名）
 - 午班先查 runs/YYYY-MM-DD-AM/shortlist.json：未消化完优先吃它，不重滚列表（细筛 runDir 仍用 AM 目录，checkpoint 才连续）
 
-【规则】全部在 profile.rules，库执行：黑名单、学历、岗位类型、标题/JD 主语言红线（加分/可选豁免）、薪资 Max ≥ minSalaryK、JD 必含关键词、猎头挂单（默认过滤）、外包岗（默认 NEEDS_REVIEW 交你判断）。列表页薪资打码由库解码（每批开 1 页校验），不用管。
+【规则】全部在 profile.rules，库执行、没有预设：黑名单、学历、岗位类型、标题/JD 主语言红线（加分/可选豁免）、薪资 Max ≥ minSalaryK（0 = 不限）、JD 必含关键词、猎头挂单（默认过滤）、外包岗（默认 NEEDS_REVIEW 交你判断）。列表页薪资打码由库解码（每批开 1 页校验），不用管。
 
 【状态机：两个独立 heredoc 轮次，串行走完】
 0. 每轮 heredoc 开头：import 三个库 → profile = loadProfile() → taskSpace（首轮建，后续 taskSpace(<id>) 复用）→ pipe = makePipeline(makeH(page), profile)。
-1. 粗筛轮 DISCOVER：`pipe.discover(runDir, page)`（关键词/轮数取 profile.search，5 词约 200s）。登录预检内置，失效即停并 handOff 交扫码；游客态直接终止本轮写 BLOCKED 报告。
-2. 细筛轮 SCREEN：`pipe.screenLoop(runDir, page)`（上限/间隔取 profile.pacing）。逐岗开详情→判定→通过立即发送→当场记账→随机等待→下一岗。绝不攒批统一发。中断恢复自动跳过终态公司，FAILED 重试。rounds 不够时多轮 heredoc 续跑直到 maxSend 达标或 shortlist 耗尽。跑完看 details.jsonl 的 NEEDS_REVIEW（外包岗）：读 jd 摘要自行判断，技术栈高度匹配才 `pipe.sendReviewed(runDir, co)` 补发，报告里单独标注。
+1. 粗筛轮 DISCOVER：`pipe.discover(runDir, page)`（城市/关键词/轮数取 profile.search，1 城 5 词约 200s，多城市按城市拆轮）。返回 ok=false 看 phase：login → 停并 handOff 交扫码；risk-control → 立即停，当天不再跑；config → profile 缺城市/关键词，先补。
+2. 细筛轮 SCREEN：`pipe.screenLoop(runDir, page)`（上限/间隔取 profile.pacing）。逐岗开详情→判定→通过立即发送→当场记账→随机等待→下一岗。绝不攒批统一发。中断恢复自动跳过终态公司，FAILED 重试。返回值先看 stop：null 正常收尾；time-budget 同 runDir 再开一轮续跑；consecutive-failures / login / risk-control 立即停交人。跑完看 details.jsonl 的 NEEDS_REVIEW（外包岗）：读 jd 摘要自行判断，技术栈高度匹配才 `pipe.sendReviewed(runDir, co)` 补发，报告里单独标注。
 3. 收尾 LEDGER：`pipeline.updateLedgerFromCheckpoint(pipeline.ledgerPath(), runDir+'/checkpoint.jsonl', 今日日期, runDir+'/details.jsonl')`（幂等）。
 
 【执行约束】
