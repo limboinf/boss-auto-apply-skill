@@ -1,0 +1,137 @@
+{
+  "candidate": {
+    "intro": "我8年后端研发经验，近2年专注大模型应用与 Agent 落地，做过3个上线的 AI 产品，能独立完成从方案设计、开发到上线的交付。",
+    "links": [
+      {
+        "label": "GitHub",
+        "url": "https://github.com/your-name"
+      },
+      {
+        "label": "个人网站",
+        "url": "https://your-site.example"
+      }
+    ]
+  },
+  "message": {
+    "template": "您好，看到贵司在招{title}，很感兴趣。{intro}{hook}，相信可以快速胜任该岗位。\n\n{links}",
+    "fallbackHook": "仔细读过贵司 JD，与我的经验高度匹配（{co}岗）"
+  },
+  "hooks": [
+    {
+      "keywords": [
+        "RAG",
+        "检索增强",
+        "知识库"
+      ],
+      "text": "做过 RAG 知识库检索系统的架构与调优"
+    },
+    {
+      "keywords": [
+        "LangGraph",
+        "LangChain"
+      ],
+      "text": "有 LangChain/LangGraph 工作流编排的实战经验"
+    },
+    {
+      "keywords": [
+        "微调",
+        "fine-tuning",
+        "SFT",
+        "LoRA"
+      ],
+      "text": "有大模型微调与效果评估的完整实践"
+    },
+    {
+      "keywords": [
+        "全栈",
+        "前端",
+        "后端",
+        "Web"
+      ],
+      "text": "全栈出身，能一人闭环从前端到后端到部署"
+    },
+    {
+      "keywords": [
+        "Python"
+      ],
+      "text": "Python 重度用户，AI 应用全部 Python 技术栈交付"
+    },
+    {
+      "keywords": [
+        "大模型",
+        "LLM",
+        "Agent",
+        "智能体"
+      ],
+      "text": "近两年专注 AI Agent 落地，从架构到上线的闭环都亲手做过"
+    }
+  ],
+  "search": {
+    "city": "101010100",
+    "queries": [
+      "Agent",
+      "AI Agent",
+      "智能体",
+      "大模型应用开发",
+      "LLM"
+    ],
+    "experienceCodes": [
+      105,
+      106,
+      107
+    ],
+    "maxRounds": 30
+  },
+  "rules": {
+    "minSalaryK": 30,
+    "blockCompanies": [
+      "腾讯",
+      "阿里",
+      "字节",
+      "百度",
+      "美团",
+      "京东",
+      "华为"
+    ],
+    "rejectDegrees": [
+      "硕士",
+      "博士"
+    ],
+    "extraRejectTitles": [
+      {
+        "pattern": "产品经理|测试开发|测试工程师|测试平台|运维工程师|讲师",
+        "reason": "岗位类型不匹配"
+      }
+    ],
+    "rejectLanguages": [
+      "Go",
+      "C++",
+      "Rust",
+      "PHP",
+      "C#"
+    ],
+    "mustHaveKeywords": [
+      "AI",
+      "Agent",
+      "Agentic",
+      "LLM",
+      "AIGC",
+      "RAG",
+      "智能体",
+      "大模型",
+      "多模态",
+      "机器学习",
+      "深度学习"
+    ],
+    "headhunter": "reject",
+    "outsourcing": "review"
+  },
+  "pacing": {
+    "maxSendPerRound": 7,
+    "sendIntervalS": [
+      20,
+      35
+    ],
+    "budgetS": 480
+  }
+}

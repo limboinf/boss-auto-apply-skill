@@ -1,0 +1,15 @@
+# 运行数据：每日批次进度/日志/临场临时脚本，只在本机有意义，不入库
+data/runs/
+data/**/*.log
+*.log
+
+# 系统 / 编辑器 / 依赖
+.DS_Store
+node_modules/
+*.tmp
+
+# 个人投递台账（公司名+日期），私有数据；跨机器用 BOSS_APPLY_DATA 指向私有目录
+data/applied-ledger.json
+
+# 个人配置（自我介绍/链接/hook 话术/偏好），模板在 templates/profile.example.json
+data/profile.json

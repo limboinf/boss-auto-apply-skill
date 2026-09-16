@@ -1,13 +1,15 @@
-// BOSS直聘批量投递库（2026-09-07 全链路验证版，含改版后行为适配）
-// 用法：heredoc 里
-//   const makeLib = require('<repo>/scripts/batch_apply_lib.js')
-//   const lib = makeLib({ js, click, wait, gotoAndWait, pageInfo })
-//   const r = await lib.applyOne({ co, key, title, hook, url }, makeMsg)
-//   const ok = await lib.verifyPanel(key, 'hook特征句', ['其他hook1','其他hook2'])
-//   const msg = lib.makeMsg(title, hook)
+// BOSS直聘单岗投递库（2026-09-07 全链路验证版，含改版后行为适配）
+// 用法：
+//   const lib = makeLib({ js, click, wait, gotoAndWait, pageInfo }, profile)   // profile 见 scripts/profile.js
+//   const r = await lib.applyOne({ co, key, title, hook, own, url }, lib.makeMsg(title, hook))
+//   const v = await lib.verifyCurrent(job)
+const { normalizeProfile } = require('./profile.js')
 
-function makeLib(h) {
+function makeLib(h, profileArg) {
   const { js, click, wait, gotoAndWait, pageInfo } = h
+  const profile = normalizeProfile(profileArg)
+  // 发送验证标记：每条链接去掉协议后的串必须出现在已发消息面板里（防截断/防串稿）
+  const linkMarkers = (profile.candidate.links || []).map(l => String(l.url).replace(/^https?:\/\//, ''))
 
   async function waitFor(fn, timeoutS) {
     const t0 = Date.now()
@@ -24,7 +26,6 @@ function makeLib(h) {
     if (missing.length) return { ok: false, error: '缺少字段:' + missing.join(',') }
     if (!/^https:\/\/www\.zhipin\.com\/job_detail\//.test(job.url)) return { ok: false, error: 'URL格式异常:' + job.url }
     if (!job.hook.includes(job.own)) return { ok: false, error: 'own不在hook内:' + job.co }
-    if (!/^https:\/\/github\.com\/limboinf$/.test('https://github.com/limboinf')) return { ok: false, error: 'GitHub模板异常' }
     return { ok: true }
   }
 
@@ -64,13 +65,11 @@ function makeLib(h) {
     })
   }
 
+  // 打招呼语 = profile.message.template 填 {title}{intro}{hook}{links}
   function makeMsg(title, hook) {
-    return [
-      '您好，看到贵司在招' + title + '，很感兴趣。我12年研发经验，近3年专注 AI Agent 落地，已落地10+个 AI 应用，能独立完成从架构设计、开发到上线的端到端交付。' + hook + '，相信可以快速胜任该岗位。',
-      '',
-      '个人网站：https://limbo101.win',
-      'GitHub：https://github.com/limboinf',
-    ].join('\n')
+    const links = (profile.candidate.links || []).map(l => l.label + '：' + l.url).join('\n')
+    return String(profile.message.template)
+      .replace('{title}', title).replace('{intro}', profile.candidate.intro || '').replace('{hook}', hook).replace('{links}', links)
   }
 
   // 发送：真实点击 + 坐标兜底 + 元素点击再兜底（js click 已失效）
@@ -164,14 +163,14 @@ function makeLib(h) {
     return { ok: len >= 50, len }
   }
 
-  // 当前会话终验：active 会话正确 + 自己 hook + 两个完整 URL + 草稿清空。
-  // 不再用“其他公司 hook 黑名单”：30家规模下自然语言必然撞词，造成误报和人工重验。
+  // 当前会话终验：active 会话正确 + 自己 hook（own）+ 每条链接完整出现 + 草稿清空。只看右侧消息面板（x>320），左侧会话列表预览会污染。
+  // 不用“其他公司 hook 黑名单”：30家规模下自然语言必然撞词，造成误报和人工重验。
   async function verifyCurrent(job) {
     const activeOk = await js(`(() => {
       const act = [...document.querySelectorAll('.friend-content')].find(e => /active|current|selected/i.test(e.className))
       return !!(act && act.innerText.includes(${JSON.stringify(job.key)}))
     })()`)
-    if (!activeOk) return { activeOk: false, own: false, hasSite: false, hasGh: false, draftLen: -1, ok: false }
+    if (!activeOk) return { activeOk: false, own: false, links: [], draftLen: -1, ok: false }
     return await js(`(() => {
       const cands = [...document.querySelectorAll('div, p, span')]
         .map(e => ({ e, r: e.getBoundingClientRect() }))
@@ -179,32 +178,14 @@ function makeLib(h) {
       const leaf = cands.filter(({ e }) => ![...e.children].some(c => c.innerText && c.innerText.length > 20 && c.getBoundingClientRect().width > 300))
       const all = leaf.map(({ e }) => e.innerText).join('\\n')
       const own = all.includes(${JSON.stringify(job.own)})
-      const hasSite = all.includes('limbo101.win')
-      const hasGh = all.includes('github.com/limboinf') && !all.includes('GitHub：https://limboinf\\n')
+      const links = ${JSON.stringify(linkMarkers)}.map(m => all.includes(m))
       const el = document.querySelector('[contenteditable="true"]')
       const draftLen = el ? el.innerText.trim().length : -1
-      return { activeOk: true, own, hasSite, hasGh, draftLen, ok: own && hasSite && hasGh && (!el || draftLen === 0) }
+      return { activeOk: true, own, links, draftLen, ok: own && links.every(Boolean) && (!el || draftLen === 0) }
     })()`)
   }
 
-  // 兼容旧调用；新流程统一使用 verifyCurrent(job)。
-  async function verifyPanel(ownHook, otherHooks) {
-    return await js(`(() => {
-      const cands = [...document.querySelectorAll('div, p, span')]
-        .map(e => ({ e, r: e.getBoundingClientRect() }))
-        .filter(({ e, r }) => r.x > 320 && r.width > 300 && r.height > 40 && r.height < 500 && e.innerText && e.innerText.length > 20 && !e.querySelector('[contenteditable]'))
-      const leaf = cands.filter(({ e }) => ![...e.children].some(c => c.innerText && c.innerText.length > 20 && c.getBoundingClientRect().width > 300))
-      const all = leaf.map(({ e }) => e.innerText).join('\\n')
-      const own = all.includes(${JSON.stringify(ownHook)})
-      // GitHub 完整地址必须出现在已发面板（防 https://limboinf 截断版混入）
-      const hasGh = all.includes('github.com/limboinf') && !all.includes('GitHub：https://limboinf\\n')
-      const others = ${JSON.stringify(otherHooks)}.filter(k => all.includes(k))
-      const el = document.querySelector('[contenteditable="true"]')
-      return { own, hasGh, others, draftLen: el ? el.innerText.trim().length : -1, ok: own && hasGh && others.length === 0 && (!el || el.innerText.trim().length === 0) }
-    })()`)
-  }
-
-  return { waitFor, validateJob, validateBatch, parseSalary, isSalaryEligible, isDuplicateCompany, makeMsg, applyOne, switchConv, fillDraft, realClickSend, verifyCurrent, verifyPanel, inputState }
+  return { waitFor, validateJob, validateBatch, parseSalary, isSalaryEligible, isDuplicateCompany, makeMsg, applyOne, switchConv, fillDraft, realClickSend, verifyCurrent, inputState }
 }
 
 module.exports = makeLib
