@@ -1,0 +1,24 @@
+工作日 BOSS Agent 投递批次（v2 流程：粗筛→细筛串行，过审即发不攒批）。早班目标最多50家，午班目标最多30家；合计最多80家，但候选池不足或不满足条件时允许少投，不为凑数降低硬规则。结果发指定飞书群。
+
+【固定目录】
+- v2 库：/Users/limbo/work/github/boss-auto-apply/scripts/pipeline_v2_lib.js（makePipelineV2 + 纯逻辑可离线测）
+- 旧投递库（v2 内部依赖）：/Users/limbo/work/github/boss-auto-apply/scripts/batch_apply_lib.js
+- 台账：/Users/limbo/work/github/boss-auto-apply/data/applied-ledger.json
+- 当日工作目录：/Users/limbo/work/github/boss-auto-apply/data/runs/YYYY-MM-DD-AM 或 PM（按当前时段命名）
+- 午班先查 runs/YYYY-MM-DD-AM/shortlist.json：未消化完优先吃它，不重滚列表
+
+【硬规则（已内置于 pipeline_v2_lib：filterCards + evalDetail，勿临场重写）】
+排除大厂/模型公司（含中文名：深度求索/名之梦等）、硕士/博士、实习/校招/应届/销售/客服/电销/测试/运维/产品经理/讲师、详情页薪资 Max < 30K、面议或无法解析、Go/C++/Rust/PHP/C# 作为主语言要求（加分/可选措辞豁免）、JD 无 AI/Agent/大模型要素。薪资判断列表页反爬打码（「-K·薪」PUA字符）一律留细筛读详情页真实薪资，用 lib.evalDetail 判。猎头挂单默认过滤：masked 公司名（含「某」且以「公司」结尾）是猎头挂单，filterCards 的 excludeHeadhunter 默认 true；如朋哥明确要求含猎头单才传 {excludeHeadhunter:false}。
+
+【v2 状态机：两个独立 heredoc 轮次，串行走完】
+1. 粗筛轮 DISCOVER（只滚只记，不开详情不发消息）：ego-browser 独立 task space `boss-agent-YYYYMMDD-AM/PM`；`pipe.discover(runDir, page, ['Agent','AI'], {maxRounds:30})`。滚到平台期（连续6轮卡数不增）或30轮上限；落盘 pool-<q>.json + shortlist.json + coarse-reject.json。发现日志 append 到 scroll-*.log。terminal 必须显式 timeout=550。
+2. 细筛轮 SCREEN（串行单岗闭环，过审即发）：`pipe.screenLoop(runDir, page, {maxSend:7, budgetS:480})`。逐岗开详情→evalDetail 判定→通过【立即发送】（applyOne+verifyCurrent）→当场 append details.jsonl + checkpoint.jsonl→SENT 后随机等待20-35s（防风控）→下一岗。绝不攒批统一发。中断恢复自动跳过 details.jsonl 已有公司。rounds 不够时多轮 heredoc 续跑直到 maxSend 达标或 shortlist 耗尽。
+3. 收尾 LEDGER：`v2.updateLedgerFromCheckpoint(ledgerPath, ckPath, 今日日期, runDir+'/details.jsonl')` 派生更新台账（幂等）。
+
+【执行约束】
+- heredoc 里 require 后整体包 async main()，末尾裸调 main();（不写 await，禁顶层 await）。
+- 每 heredoc 单轮 ≤550s（terminal timeout 显式 550+）；粗筛一轮约4-6分钟、细筛 7 家约5-8分钟，超时拆轮续跑。
+- 登录预检：粗筛轮 discover 内置（.nav-figure 检查），失效即停并 handOff 交扫码，游客模式直接终止本轮写 BLOCKED 报告。
+- 遇 user is controlling / task space 被接管：立即停，报告已完成和未完成，不抢回。
+- 发送验证以 verifyCurrent 为准（active 会话 + own hook + 完整 limbo101.win + 完整 github.com/limboinf + 草稿清空）。
+- 最终报告必须区分：发现卡数/粗筛通过数/细筛判定数（过/淘汰+原因分布）/实际发送数/验证通过数/台账累计/checkpoint 路径；不把"启动/unknown"说成完成。
