@@ -1,10 +1,10 @@
 工作日 BOSS 投递批次（v2 流程：粗筛→细筛串行，过审即发不攒批）。早班目标最多 <N1> 家，午班最多 <N2> 家；候选池不足或不满足条件时允许少投，不为凑数降低规则。结果发 <通知渠道>。
 
-【固定目录】（<repo> 替换成仓库绝对路径）
-- 库：<repo>/scripts/pipeline_v2_lib.js（makePipelineV2 + 纯逻辑可离线测）、<repo>/scripts/profile.js（loadProfile）、<repo>/scripts/ego_browser_adapter.js（makeH）
-- 身份与规则：<repo>/data/profile.json（loadProfile() 读；改规则改这里，不要临场改库）
-- 台账：<repo>/data/applied-ledger.json
-- 当日工作目录：<repo>/data/runs/YYYY-MM-DD-AM 或 PM（按当前时段命名）
+【固定目录】（<skill> 替换成 skill 目录绝对路径，即 SKILL.md 所在目录；<data> 缺省 ~/.boss-auto-apply，或 BOSS_APPLY_DATA）
+- 库：<skill>/scripts/pipeline_v2_lib.js（makePipelineV2 + 纯逻辑可离线测）、<skill>/scripts/profile.js（loadProfile）、<skill>/scripts/ego_browser_adapter.js（makeH）
+- 身份与规则：<data>/profile.json（loadProfile() 读；改规则改这里，不要临场改库）
+- 台账：<data>/applied-ledger.json（v2.ledgerPath()）
+- 当日工作目录：v2.runDir('YYYY-MM-DD-AM' 或 'PM')（按当前时段命名）
 - 午班先查 runs/YYYY-MM-DD-AM/shortlist.json：未消化完优先吃它，不重滚列表（细筛 runDir 仍用 AM 目录，checkpoint 才连续）
 
 【规则】全部在 profile.rules，库执行：黑名单、学历、岗位类型、标题/JD 主语言红线（加分/可选豁免）、薪资 Max ≥ minSalaryK、JD 必含关键词、猎头挂单（默认过滤）、外包岗（默认 NEEDS_REVIEW 交你判断）。列表页薪资打码由库解码（每批开 1 页校验），不用管。

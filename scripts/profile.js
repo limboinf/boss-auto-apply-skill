@@ -5,15 +5,20 @@
 //   偏好 search/rules/pacing     —— 有中性默认值（DEFAULTS），用户按需覆盖
 //   机制（反爬解码、选择器、防风控节奏的下限）—— 不暴露，在库里
 //
-// 路径：环境变量 BOSS_APPLY_PROFILE > <BOSS_APPLY_DATA 或 repo/data>/profile.json。模板见 templates/profile.example.json。
+// 数据目录（profile / 台账 / 每日 runs）默认 ~/.boss-auto-apply，与代码目录分离：本库以 skill 形式装在
+// ~/.agents/skills 下，`npx skills update` 会整目录删掉重拷，个人数据放代码目录里会被抹掉。
+// 选 ~/.<name>/ 单目录而不是 XDG 三分（config/data/state）：skills 生态里前者是多数派（~/.hyperframes、~/.baoyu-skills…），
+// 且 profile/台账/runs 用户要一起看，拆开反而难找。要换位置用 BOSS_APPLY_DATA。
+// 路径：环境变量 BOSS_APPLY_PROFILE > <BOSS_APPLY_DATA 或 ~/.boss-auto-apply>/profile.json。模板见 assets/profile.example.json。
 // CLI：node scripts/profile.js init|check|show
 const fs = require('fs')
+const os = require('os')
 const pathMod = require('path')
 
 const REPO_ROOT = pathMod.resolve(__dirname, '..')
-const dataDir = () => process.env.BOSS_APPLY_DATA || pathMod.join(REPO_ROOT, 'data')
+const dataDir = () => process.env.BOSS_APPLY_DATA || pathMod.join(os.homedir(), '.boss-auto-apply')
 const profilePath = () => process.env.BOSS_APPLY_PROFILE || pathMod.join(dataDir(), 'profile.json')
-const EXAMPLE_PATH = pathMod.join(REPO_ROOT, 'templates', 'profile.example.json')
+const EXAMPLE_PATH = pathMod.join(REPO_ROOT, 'assets', 'profile.example.json')
 
 // BOSS 列表页服务端筛选码（从页面筛选器 ka=sel-job-rec-* 读出，2026-09-16）
 const SALARY_BANDS = { 402: [0, 3], 403: [3, 5], 404: [5, 10], 405: [10, 20], 406: [20, 50], 407: [50, Infinity] }

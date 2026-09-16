@@ -1,9 +1,14 @@
 ---
-name: boss-auto-apply
-description: Use when 自动投递 BOSS直聘岗位（用户说"帮我投简历/投 BOSS/跑今天的投递批次"）. 按用户 profile.json 里的身份和偏好：粗筛滚动记录→细筛串行单岗闭环（过审即发不攒批），防风控、断点续跑、台账去重. 首次使用先按「首次使用」一节把 profile 问出来.
+name: boss-auto-apply-skill
+description: BOSS直聘自动投递流水线：按用户 profile.json 里的身份和偏好，粗筛滚动记录→细筛串行单岗闭环（过审即发不攒批），防风控、断点续跑、台账去重，需要 ego-browser 等浏览器自动化。Use when 用户说"帮我投简历 / 投 BOSS / 跑今天的投递批次 / 改投递规则"。首次使用先按「首次使用」一节把 profile 问出来。
+license: All Rights Reserved（未获授权勿商用）
+compatibility: Requires Node.js >= 18 and ego-browser (ego lite, https://lite.ego.app, macOS) with the ego-browser skill installed; a logged-in BOSS直聘 (zhipin.com) session in that browser; network access to zhipin.com only.
+metadata:
+  author: limboinf
+  version: "2.1"
 ---
 
-# boss-auto-apply — BOSS直聘自动投递流水线
+# boss-auto-apply-skill — BOSS直聘自动投递流水线
 
 粗筛（只滚只记）→ 细筛（串行单岗闭环：读 JD → 规则判定 → 立即发送 → 验证 → 当场记账）。不攒批统一发送，防平台风控；全量落盘，中断随时续跑。**谁在投、投什么、怎么说**全部来自用户自己的 `profile.json`，库里只有机制。
 
@@ -11,8 +16,8 @@ description: Use when 自动投递 BOSS直聘岗位（用户说"帮我投简历/
 
 没有 profile 库会直接拒绝跑（`loadProfile` 抛错），**不要**拿模板里的示例身份去投。流程：
 
-1. `node scripts/profile.js init` → 从 `templates/profile.example.json` 复制到 `data/profile.json`（gitignore，不入库；跨机器设 `BOSS_APPLY_DATA` 或 `BOSS_APPLY_PROFILE`）
-2. 用下面的问题把用户的答案问出来（一次问完，别挤牙膏），写进 `data/profile.json`：
+1. `node <skill目录>/scripts/profile.js init` → 从 `assets/profile.example.json` 复制到 `~/.boss-auto-apply/profile.json`（数据目录与代码目录分离，`npx skills update` 重装不会抹掉；要换位置设 `BOSS_APPLY_DATA` 或 `BOSS_APPLY_PROFILE`）
+2. 用下面的问题把用户的答案问出来（一次问完，别挤牙膏），写进 `~/.boss-auto-apply/profile.json`：
 
 | 问 | 写到 | 说明 |
 |---|---|---|
@@ -31,21 +36,26 @@ description: Use when 自动投递 BOSS直聘岗位（用户说"帮我投简历/
 | 每轮最多发几个、间隔 | `pacing` | 默认 7 个 / 20-35s；间隔下限 15s 写死在库里，改小无效（防风控） |
 | 还想拦哪些岗位类型 | `rules.extraRejectTitles` | 追加式 `[{pattern, reason}]`；实习/校招、储备/管培、销售、客服 4 条固定生效不用写。想拦产品经理/测试/运维/讲师就加一条（模板里有示例） |
 
-3. `node scripts/profile.js check` → 打印摘要，用户确认无误再跑。
+3. `node <skill目录>/scripts/profile.js check` → 打印摘要，用户确认无误再跑。
 
 **profile 里没有的东西就是不该改的**：反爬字体解码、页面选择器、会话定位、发送三重兜底、间隔下限——这些改了只会坏。
 
-## 依赖
+## 依赖（开工前逐项确认，缺一项先装再跑）
 
-- **ego-browser**（或任何提供 `page`/CDP 能力的浏览器自动化）：粗筛滚轮、细筛开详情页、发送消息。`scripts/ego_browser_adapter.js` 的 `makeH(page)` 把 ego 的 Page 映射成库要的 `h`；换别的浏览器自动化只需另写一个 `makeH`
-- **h 接口契约**：`js(exprString)→Promise<any>` 在页面求值表达式；`click(selector | [x,y], {label})`；`wait(seconds)`；`gotoAndWait(url, {timeout, settle})` 秒；`pageInfo()→{url}`。粗筛另外直接用 `page.goto / waitForLoadState / cdp('Input.dispatchMouseEvent')`
-- Node.js（纯逻辑函数可离线跑，无需浏览器）
-- BOSS直聘已登录态（粗筛内置登录预检，失效即停）
+| 依赖 | 检查 | 缺了怎么办 |
+|---|---|---|
+| Node.js ≥ 18 | `node -v` | 库零第三方依赖，不用 `npm install` |
+| ego lite 浏览器（提供 `ego-browser` 命令） | `command -v ego-browser` | 按 ego-browser skill 的 `references/install.md` 装（macOS），装完用户在 GUI 完成 onboarding；找不到命令先 `export PATH="$HOME/.local/bin:$PATH"` |
+| ego-browser skill（`taskSpace` / `page` / heredoc 用法都在它那） | agent 已加载 `ego-browser` skill | `npx skills add citrolabs/ego-lite --skill ego-browser -g -y` |
+| BOSS直聘登录态 | 粗筛内置登录预检 | 失效即停并 handOff 交用户扫码，游客态不跑 |
+
+- 浏览器只依赖 `h` 接口：`js(exprString)→Promise<any>` 在页面求值表达式；`click(selector | [x,y], {label})`；`wait(seconds)`；`gotoAndWait(url, {timeout, settle})` 秒；`pageInfo()→{url}`。`scripts/ego_browser_adapter.js` 的 `makeH(page)` 把 ego 的 Page 映射成 `h`；换别的浏览器自动化只需另写一个 `makeH`。粗筛另外直接用 `page.goto / waitForLoadState / cdp('Input.dispatchMouseEvent')`
+- 纯逻辑函数（规则判定 / hook / 台账）不碰浏览器，可离线跑测试
 
 ## 目录结构
 
 ```
-boss-auto-apply/
+boss-auto-apply-skill/
 ├── SKILL.md                  # 本文件
 ├── scripts/
 │   ├── profile.js            # profile 加载/校验/默认值 + CLI（init|check）
@@ -54,39 +64,41 @@ boss-auto-apply/
 │   ├── ego_browser_adapter.js     # ego-browser Page → h 适配器（makeH）
 │   ├── batch_apply_runner_lib.js  # v1 runner（备用）
 │   └── state_store.js        # v1 事件状态机（备用）
+├── references/
+│   ├── rules.md              # 规则生效细节
+│   └── pitfalls.md           # 已知坑
 ├── tests/                    # 离线测试（无浏览器/无网络）
-├── templates/
-│   ├── profile.example.json  # profile 模板（示例身份，别拿它去投）
-│   └── cron-prompt.txt       # 定时批次 prompt 模板
-└── data/                     # 全部 gitignore：个人数据不入库
-    ├── profile.json          # 你的身份 + 偏好
-    ├── applied-ledger.json   # 总台账：applied[]（已投）+ eliminated[]（已淘汰），缺失自动建
-    └── runs/YYYY-MM-DD-*/    # 每批次：pool-*.json / shortlist.json / details.jsonl / checkpoint.jsonl
+└── assets/
+    ├── profile.example.json  # profile 模板（示例身份，别拿它去投）
+    └── cron-prompt.txt       # 定时批次 prompt 模板
+
+~/.boss-auto-apply/           # 数据目录（不在代码目录里，重装/更新 skill 不受影响）
+├── profile.json              # 你的身份 + 偏好
+├── applied-ledger.json       # 总台账：applied[]（已投）+ eliminated[]（已淘汰），缺失自动建
+└── runs/YYYY-MM-DD-*/        # 每批次：pool-*.json / shortlist.json / details.jsonl / checkpoint.jsonl
 ```
 
-数据目录：环境变量 `BOSS_APPLY_DATA` 优先；缺省用仓库内 `data/`。profile 单独可用 `BOSS_APPLY_PROFILE` 指定。
+数据目录：环境变量 `BOSS_APPLY_DATA` 优先；缺省 `~/.boss-auto-apply/`。profile 单独可用 `BOSS_APPLY_PROFILE` 指定。库里 `v2.dataDir()` / `v2.ledgerPath()` / `v2.runDir(name)` 给出路径，别手拼。
 
-## 规则怎么生效（都在 profile.rules，库只负责执行）
+## 规则与坑（按需读，别一上来全加载）
 
-- **卡级（不开详情页就拦）**：黑名单公司、台账已投/已淘汰、本批重复公司、猎头挂单、固定 4 条 + `extraRejectTitles`、标题含 `rejectLanguages`、标签硬性 `rejectDegrees`、薪资（可解析时 Max ≥ `minSalaryK`；时薪/日薪/面议淘汰；打码留细筛）
-- **详情级**：职位已关闭 / 薪资无法解析（不进台账，下轮重试）、面议、Max < `minSalaryK`、banner 硬性 `rejectDegrees`、JD 主语言命中 `rejectLanguages`（本句有"加分/优先/可选/了解"豁免）、固定 4 条 + `extraRejectTitles`、JD 未命中 `mustHaveKeywords`、外包特征按 `outsourcing` 策略
-- **猎头挂单识别**（机制，不可配）：含「某」的 masked 公司名、「知名公司」「头部XX公司」、人力/猎头机构名。这类岗点沟通后会话挂在猎头名下，按原公司名找会话必失败
-- **外包 `review`**：其余规则全过但命中外包/驻场/外派/派遣 → `NEEDS_REVIEW` 落 details.jsonl（带 JD 摘要），agent 读完判断，要投 `pipe.sendReviewed(runDir, '公司名')`，不投不用动
+- 规则怎么落到卡级 / 详情级、猎头识别、外包 review 语义：[references/rules.md](references/rules.md)——改 profile.rules 或解释某岗为什么被淘汰时读
+- 实战踩过的坑（猎头挂单会话找不到、btn-send 要真点、验证面板范围、BOSS 改版、自动打招呼语双发）：[references/pitfalls.md](references/pitfalls.md)——发送失败 / 验证不过 / 选择器失效时读
 
 ## 流程（两个独立 heredoc 轮次，串行走完）
 
 ego-browser 的 `nodejs` 是 **ESM，没有 `require`**，加载库用 `(await import(path)).default`。每轮 heredoc 开头固定这段：
 
 ```js
-const REPO = '<repo 绝对路径>'
-const { makeH } = (await import(REPO + '/scripts/ego_browser_adapter.js')).default
-const v2 = (await import(REPO + '/scripts/pipeline_v2_lib.js')).default
-const { loadProfile } = (await import(REPO + '/scripts/profile.js')).default
+const SKILL = '<本 skill 目录绝对路径，即 SKILL.md 所在目录>'
+const { makeH } = (await import(SKILL + '/scripts/ego_browser_adapter.js')).default
+const v2 = (await import(SKILL + '/scripts/pipeline_v2_lib.js')).default
+const { loadProfile } = (await import(SKILL + '/scripts/profile.js')).default
 const profile = loadProfile()                              // 没有 / 不合法直接抛，先去「首次使用」
 const task = await taskSpace('boss-agent-YYYYMMDD-AM')   // 首轮建；后续轮 taskSpace(<spaceId>) 复用同一个
 const page = task.page('p1')
 const pipe = v2.makePipelineV2(makeH(page), profile)
-const runDir = REPO + '/data/runs/YYYY-MM-DD-AM'
+const runDir = v2.runDir('YYYY-MM-DD-AM')                 // → ~/.boss-auto-apply/runs/YYYY-MM-DD-AM
 ```
 
 ### 1. 粗筛 DISCOVER（只滚只记，不发消息）
@@ -136,12 +148,3 @@ node tests/test_batch_apply_lib.js      # 投递库 + 消息模板
 node tests/test_runner_checkpoint.js    # v1 断点语义
 node tests/test_pipeline_logic.js       # v1 流水线回归
 ```
-
-## 已知坑（实战踩过）
-
-- **猎头挂单**：点沟通后会话挂在猎头公司名下，按原公司名找会话必失败——默认过滤已根治；`headhunter: allow` 放行的要走补救通道（详情页点继续沟通→跳聊天页直接填发）
-- **btn-send 用 js click 不触发**：必须真实坐标点击（realClickSend 已内置三重兜底）
-- **发送验证不能查 body.innerText**：左侧会话列表预览会污染；限定右侧消息面板（x>320）
-- **BOSS 改版频繁**：选择器变了优先按文本内容定位，类名不可靠
-- 会话定位 key 必须用聊天页实际显示的中文公司名子串，不能用自造拉丁 key
-- **BOSS 账号的「自动打招呼语」会在点「立即沟通」时先发一条**，再发我们的定制文案，HR 会收到两条。要单条就去 BOSS 设置里关掉自动打招呼

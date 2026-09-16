@@ -6,24 +6,24 @@
 //   3. 台账 applied-ledger.json 由 checkpoint 中 VERIFIED 记录派生更新（幂等，按公司去重）。
 // 只在 ego-browser heredoc 内 require；h = {js, click, wait, gotoAndWait, pageInfo}。
 // 纯逻辑函数（filterCards/evalDetail/makeHook/updateLedgerFromCheckpoint）不依赖浏览器，可直接离线测试。
-// 数据目录解析：环境变量 BOSS_APPLY_DATA 优先；缺省用仓库内 data/（相对本文件定位，无机器特有路径）。
+// 数据目录由 profile.js 统一解析（BOSS_APPLY_DATA 或 ~/.boss-auto-apply），代码目录里不放任何个人数据。
 const fs = require('fs')
 const pathMod = require('path')
 const makeApplyLib = require('./batch_apply_lib.js')
+const { DEFAULTS: PROFILE_DEFAULTS, BASE_REJECT_TITLES, normalizeProfile, dataDir } = require('./profile.js')
 
-const REPO_ROOT = pathMod.resolve(__dirname, '..')
-function dataDir() {
-  return process.env.BOSS_APPLY_DATA || pathMod.join(REPO_ROOT, 'data')
-}
 function ledgerPath() {
   return pathMod.join(dataDir(), 'applied-ledger.json')
+}
+// 每批次工作目录：<data>/runs/<name>，name 形如 2026-09-16-AM
+function runDir(name) {
+  return pathMod.join(dataDir(), 'runs', name)
 }
 
 // ---------------- 纯逻辑（可离线测试） ----------------
 // 规则参数全部来自 profile（scripts/profile.js）：纯函数接 rules / profile 入参，缺省用 DEFAULTS。
 // 这里只剩「机制」常量（反爬字体、薪资正则、猎头名模式）。
 
-const { DEFAULTS: PROFILE_DEFAULTS, BASE_REJECT_TITLES, normalizeProfile } = require('./profile.js')
 const DEFAULT_RULES = PROFILE_DEFAULTS.rules
 
 // 薪资区间：兼容「30-60K」「30K-60K」「30-60K·15薪」
@@ -486,4 +486,4 @@ function makePipelineV2(h, profileArg) {
   return { waitFor, log, discover, screenAndSendOne, screenLoop, sendReviewed, lib }
 }
 
-module.exports = { makePipelineV2, filterCards, cardSalaryVerdict, evalDetail, langRedLine, hardEduRequired, sameCompany, normCo, kwHit, makeHook, ownOf, decodeSalaryFont, parseSalaryRange, listUrl, updateLedgerFromCheckpoint, isHeadhunterPost, dataDir, ledgerPath, DEFAULT_RULES }
+module.exports = { makePipelineV2, filterCards, cardSalaryVerdict, evalDetail, langRedLine, hardEduRequired, sameCompany, normCo, kwHit, makeHook, ownOf, decodeSalaryFont, parseSalaryRange, listUrl, updateLedgerFromCheckpoint, isHeadhunterPost, dataDir, ledgerPath, runDir, DEFAULT_RULES }
