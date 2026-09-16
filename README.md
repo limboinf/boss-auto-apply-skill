@@ -49,21 +49,6 @@ ln -s "$(pwd)/boss-auto-apply-skill" ~/.hermes/skills/career/boss-auto-apply-ski
 
 想定时跑：[assets/cron-prompt.txt](assets/cron-prompt.txt) 是给 agent 定时任务用的 prompt 模板，填上目标数量和通知渠道即可。
 
-手动在 ego-browser 的 `nodejs` 里跑也行（ESM，用 `import` 不用 `require`）：
-
-```js
-const SKILL = '/Users/you/.agents/skills/boss-auto-apply-skill'
-const { makeH } = (await import(SKILL + '/scripts/ego_browser_adapter.js')).default
-const v2 = (await import(SKILL + '/scripts/pipeline_v2_lib.js')).default
-const { loadProfile } = (await import(SKILL + '/scripts/profile.js')).default
-const pipe = v2.makePipelineV2(makeH(page), loadProfile())
-const runDir = v2.runDir('2026-09-16-AM')
-
-await pipe.discover(runDir, page)      // 1. 粗筛
-await pipe.screenLoop(runDir, page)    // 2. 细筛，过审即发
-v2.updateLedgerFromCheckpoint(v2.ledgerPath(), runDir + '/checkpoint.jsonl', '2026-09-16', runDir + '/details.jsonl')  // 3. 台账
-```
-
 ## 配置（profile.json）
 
 模板 [assets/profile.example.json](assets/profile.example.json)，字段逐条说明在 [SKILL.md](SKILL.md)「首次使用」。四块：
@@ -94,8 +79,8 @@ git clone https://github.com/limboinf/boss-auto-apply-skill.git && cd boss-auto-
 for t in tests/*.js; do node "$t"; done     # 离线测试，无需浏览器 / 网络（开发者跑测试才需要系统 Node ≥ 18）
 ```
 
-- `scripts/pipeline_v2_lib.js` 主库：纯逻辑（`filterCards` / `evalDetail` / `makeHook` / `updateLedgerFromCheckpoint`）+ 浏览器流程（`discover` / `screenLoop`）
-- `scripts/batch_apply_lib.js` 单岗投递与发送验证；`scripts/ego_browser_adapter.js` ego-browser 适配
+- `scripts/pipeline.js` 主库：纯逻辑（`filterCards` / `evalDetail` / `makeHook` / `updateLedgerFromCheckpoint`）+ 浏览器流程（`discover` / `screenLoop`）
+- `scripts/apply.js` 单岗投递与发送验证；`scripts/ego_browser_adapter.js` ego-browser 适配
 - `scripts/profile.js` profile 加载 / 校验 / 默认值 + CLI
 - 实战踩过的坑（猎头挂单、真实坐标点击、验证面板范围、BOSS 改版）见 [references/pitfalls.md](references/pitfalls.md)
 

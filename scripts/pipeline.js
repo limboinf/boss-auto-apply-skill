@@ -1,4 +1,4 @@
-// BOSS直聘流水线 v2：粗筛（滚动记录+卡级规则）→ 细筛（串行单岗闭环：读JD→规则→定hook→立即发送→验证→当场记账）。
+// BOSS直聘流水线：粗筛（滚动记录+卡级规则）→ 细筛（串行单岗闭环：读JD→规则→定hook→立即发送→验证→当场记账）。
 // 设计原则：
 //   1. 粗筛只滚动只记录：滚到平台期或轮上限，全量落盘 pool.json，卡级规则过出 shortlist.json；
 //   2. 细筛严格串行：逐岗打开详情页，满足条件【立即发送对应消息】（用 lib.applyOne + verifyCurrent），
@@ -9,7 +9,7 @@
 // 数据目录由 profile.js 统一解析（BOSS_APPLY_DATA 或 ~/.boss-auto-apply），代码目录里不放任何个人数据。
 const fs = require('fs')
 const pathMod = require('path')
-const makeApplyLib = require('./batch_apply_lib.js')
+const makeApplyLib = require('./apply.js')
 const { DEFAULTS: PROFILE_DEFAULTS, BASE_REJECT_TITLES, normalizeProfile, dataDir } = require('./profile.js')
 
 function ledgerPath() {
@@ -224,8 +224,8 @@ function ownOf(hook) {
   return h.length > 10 ? h.slice(2, 12) : h
 }
 
-// 按 profile.hooks 顺序取第一个命中。v2 单岗闭环里 own 只用于验证当前会话，不要求跨岗唯一
-//（跨岗唯一是 v1 攒批防串稿的遗产，只会让第 N 岗以后退化成兜底文案）。
+// 按 profile.hooks 顺序取第一个命中。单岗闭环里 own 只用于验证当前会话，不要求跨岗唯一
+//（跨岗唯一只会让第 N 岗以后退化成兜底文案）。
 function makeHook(job, jdText, profile) {
   const p = normalizeProfile(profile)
   const jd = String(jdText || '')
@@ -276,7 +276,7 @@ function updateLedgerFromCheckpoint(ledgerPathArg, checkpointPath, dateStr, deta
 
 // ---------------- 浏览器流程（heredoc 内使用） ----------------
 
-function makePipelineV2(h, profileArg) {
+function makePipeline(h, profileArg) {
   const profile = normalizeProfile(profileArg)
   const rules = profile.rules
   const lib = makeApplyLib(h, profile)
@@ -486,4 +486,4 @@ function makePipelineV2(h, profileArg) {
   return { waitFor, log, discover, screenAndSendOne, screenLoop, sendReviewed, lib }
 }
 
-module.exports = { makePipelineV2, filterCards, cardSalaryVerdict, evalDetail, langRedLine, hardEduRequired, sameCompany, normCo, kwHit, makeHook, ownOf, decodeSalaryFont, parseSalaryRange, listUrl, updateLedgerFromCheckpoint, isHeadhunterPost, dataDir, ledgerPath, runDir, DEFAULT_RULES }
+module.exports = { makePipeline, filterCards, cardSalaryVerdict, evalDetail, langRedLine, hardEduRequired, sameCompany, normCo, kwHit, makeHook, ownOf, decodeSalaryFont, parseSalaryRange, listUrl, updateLedgerFromCheckpoint, isHeadhunterPost, dataDir, ledgerPath, runDir, DEFAULT_RULES }

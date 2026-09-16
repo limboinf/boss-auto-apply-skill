@@ -29,42 +29,6 @@ function makeLib(h, profileArg) {
     return { ok: true }
   }
 
-  function validateBatch(jobs) {
-    const errors = []
-    const owns = new Map()
-    for (const job of jobs || []) {
-      const v = validateJob(job)
-      if (!v.ok) errors.push(v.error)
-      if (job && job.own) {
-        const prior = owns.get(job.own)
-        if (prior) errors.push('own短语重复:' + job.own + '(' + prior + '/' + job.co + ')')
-        else owns.set(job.own, job.co)
-      }
-    }
-    return { ok: errors.length === 0, errors }
-  }
-
-  function parseSalary(text) {
-    const m = /(\d+)\s*-\s*(\d+)\s*K/i.exec(String(text || ''))
-    return m ? { min: Number(m[1]), max: Number(m[2]) } : null
-  }
-
-  // 朋哥硬规则：详情页薪资区间最高值 Max 必须 >= 30K（含边界），上限不设封顶；无法解析薪资不进入自动投递。
-  function isSalaryEligible(text) {
-    const salary = parseSalary(text)
-    return !!salary && salary.max >= 30
-  }
-
-  // 公司展示名常带地域/主体后缀：允许“较短名称包含于较长名称”的去重。
-  function isDuplicateCompany(name, existing) {
-    const n = String(name || '').replace(/\s/g, '')
-    if (!n) return false
-    return (existing || []).some(x => {
-      const e = String(typeof x === 'string' ? x : x && x.co || '').replace(/\s/g, '')
-      return e && (n.includes(e) || e.includes(n))
-    })
-  }
-
   // 打招呼语 = profile.message.template 填 {title}{intro}{hook}{links}
   function makeMsg(title, hook) {
     const links = (profile.candidate.links || []).map(l => l.label + '：' + l.url).join('\n')
@@ -185,7 +149,7 @@ function makeLib(h, profileArg) {
     })()`)
   }
 
-  return { waitFor, validateJob, validateBatch, parseSalary, isSalaryEligible, isDuplicateCompany, makeMsg, applyOne, switchConv, fillDraft, realClickSend, verifyCurrent, inputState }
+  return { waitFor, validateJob, makeMsg, applyOne, switchConv, fillDraft, realClickSend, verifyCurrent, inputState }
 }
 
 module.exports = makeLib

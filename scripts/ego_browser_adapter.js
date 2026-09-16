@@ -1,9 +1,9 @@
-// ego-browser → h 适配器。pipeline_v2_lib / batch_apply_lib 只依赖 h = {js, click, wait, gotoAndWait, pageInfo}，
+// ego-browser → h 适配器。pipeline / apply 只依赖 h = {js, click, wait, gotoAndWait, pageInfo}，
 // 这里把它们映射到 ego-browser 的 Page API（时间单位：库用秒，ego 用毫秒）。
 // 用法（ego-browser nodejs heredoc，ESM）：
 //   const { makeH } = (await import('<repo>/scripts/ego_browser_adapter.js')).default
-//   const v2 = (await import('<repo>/scripts/pipeline_v2_lib.js')).default
-//   const pipe = v2.makePipelineV2(makeH(page))
+//   const pipeline = (await import('<repo>/scripts/pipeline.js')).default
+//   const pipe = pipeline.makePipeline(makeH(page))
 function makeH(page) {
   return {
     // 在页面里求值一个 JS 表达式字符串（库里全是 IIFE 字符串）

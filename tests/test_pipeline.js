@@ -1,14 +1,14 @@
-// pipeline_v2_lib 离线单元测试（无浏览器/无网络）：
+// pipeline 离线单元测试（无浏览器/无网络）：
 // 覆盖：卡级粗筛（薪资/打码/去重/大厂/学历/实习）、详情细筛规则、hook 生成与 own 唯一性、台账派生更新。
-// 跑法：node tests/test_pipeline_v2.js
+// 跑法：node tests/test_pipeline.js
 const assert = require('assert')
 const os = require('os')
 const fs = require('fs')
 const path = require('path')
-const v2 = require('../scripts/pipeline_v2_lib.js')
+const pipeline = require('../scripts/pipeline.js')
 const { loadProfile, normalizeProfile, salaryCodesFor, validateProfile, EXAMPLE_PATH } = require('../scripts/profile.js')
 
-const { filterCards, cardSalaryVerdict, evalDetail, makeHook, ownOf, updateLedgerFromCheckpoint, makePipelineV2, decodeSalaryFont, listUrl } = v2
+const { filterCards, cardSalaryVerdict, evalDetail, makeHook, ownOf, updateLedgerFromCheckpoint, makePipeline, decodeSalaryFont, listUrl } = pipeline
 // 测试用 profile：模板身份 + 本文件需要的黑名单/hook
 const profile = loadProfile(EXAMPLE_PATH)
 profile.rules.blockCompanies = ['字节跳动', '深度求索']
@@ -109,7 +109,7 @@ assert.strictEqual(evalDetail({}, 'AI 30-60K 硕士', 'AI Agent').reason, '学�
 ok('详情页 硕士优先 豁免')
 
 // ---- sameCompany / kwHit ----
-const { sameCompany, kwHit } = v2
+const { sameCompany, kwHit } = pipeline
 assert.strictEqual(sameCompany('万联易达', '北京万联易达互联科技'), true)
 assert.strictEqual(sameCompany('京喜', '北京喜马拉雅科技'), false)   // 短名只认全等
 assert.strictEqual(sameCompany('京喜', '京 喜'), true)
@@ -195,7 +195,7 @@ assert.strictEqual(filterCards([{ title: 'Kotlin 开发', co: 'A', salary: '30-5
 ok('profile 默认合并 / 派生 / 校验 / 规则生效')
 
 // ---- updateLedgerFromCheckpoint（幂等） ----
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'v2test-'))
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pipetest-'))
 const ledgerPath = path.join(tmp, 'ledger.json')
 const ckPath = path.join(tmp, 'checkpoint.jsonl')
 fs.writeFileSync(ledgerPath, JSON.stringify({ applied: [{ co: '老公司', date: '2026-09-01' }], eliminated: [] }))
@@ -239,7 +239,7 @@ ok('SKIPPED 进台账 applied')
 
 // ---- screenLoop：mock 浏览器，测 decision 映射 / 断点 / 详情页未加载 ----
 async function testScreenLoop() {
-  const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'v2loop-'))
+  const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pipeloop-'))
   const jobs = [
     { co: '好公司', title: 'AI Agent 工程师', url: 'https://www.zhipin.com/job_detail/g1.html' },
     { co: '按钮坏公司', title: 'AI Agent 工程师', url: 'https://www.zhipin.com/job_detail/g2.html' },
@@ -262,7 +262,7 @@ async function testScreenLoop() {
       return ''
     },
   }
-  const pipe = makePipelineV2(h, profile)
+  const pipe = makePipeline(h, profile)
   const r1 = await pipe.screenLoop(runDir, null, { maxSend: 7, budgetS: 60 })
   assert.strictEqual(r1.sent, 0, '按钮异常不能算 SENT')
   const byCo = Object.fromEntries(r1.out.map(o => [o.co, o.decision]))
@@ -287,7 +287,7 @@ async function testScreenLoop() {
 
 // ---- discover：mock page，测滚动/合并去重/字体校验分支 ----
 async function testDiscover(fontOk) {
-  const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'v2disc-'))
+  const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pipedisc-'))
   const mk = (i, sal) => ({ title: 'AI Agent 工程师', co: '公司' + i, salary: sal, tags: ['3-5年', '本科'], url: 'https://www.zhipin.com/job_detail/d' + i + '.html' })
   const cards = [mk(1, PUA('30') + '-' + PUA('50') + 'K'), mk(2, PUA('15') + '-' + PUA('25') + 'K'), mk(3, '40-60K')]
   let gotoUrls = [], rounds = 0, onDetail = false
@@ -307,7 +307,7 @@ async function testDiscover(fontOk) {
       return ''
     },
   }
-  const pipe = makePipelineV2(h, profile)
+  const pipe = makePipeline(h, profile)
   const r = await pipe.discover(runDir, page, ['Agent', '智能体'], { stableRounds: 2, maxRounds: 10 })
   assert.strictEqual(r.ok, true, JSON.stringify(r))
   assert(gotoUrls[0].includes('query=Agent&salary=406,407&experience=105,106,107'), '列表 URL 带服务端筛选')

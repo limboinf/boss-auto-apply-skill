@@ -66,11 +66,9 @@ boss-auto-apply-skill/
 ├── SKILL.md                  # 本文件
 ├── scripts/
 │   ├── profile.js            # profile 加载/校验/默认值 + CLI（init|check）
-│   ├── pipeline_v2_lib.js    # 主库：filterCards/evalDetail/makeHook/updateLedgerFromCheckpoint + discover/screenLoop
-│   ├── batch_apply_lib.js    # 单岗投递库：applyOne/verifyCurrent/fillDraft/realClickSend（内部依赖）
-│   ├── ego_browser_adapter.js     # ego-browser Page → h 适配器（makeH）
-│   ├── batch_apply_runner_lib.js  # v1 runner（备用）
-│   └── state_store.js        # v1 事件状态机（备用）
+│   ├── pipeline.js           # 主库：filterCards/evalDetail/makeHook/updateLedgerFromCheckpoint + discover/screenLoop
+│   ├── apply.js              # 单岗投递库：applyOne/verifyCurrent/fillDraft/realClickSend（内部依赖）
+│   └── ego_browser_adapter.js  # ego-browser Page → h 适配器（makeH）
 ├── references/
 │   ├── rules.md              # 规则生效细节
 │   └── pitfalls.md           # 已知坑
@@ -85,7 +83,7 @@ boss-auto-apply-skill/
 └── runs/YYYY-MM-DD-*/        # 每批次：pool-*.json / shortlist.json / details.jsonl / checkpoint.jsonl
 ```
 
-数据目录：环境变量 `BOSS_APPLY_DATA` 优先；缺省 `~/.boss-auto-apply/`。profile 单独可用 `BOSS_APPLY_PROFILE` 指定。库里 `v2.dataDir()` / `v2.ledgerPath()` / `v2.runDir(name)` 给出路径，别手拼。
+数据目录：环境变量 `BOSS_APPLY_DATA` 优先；缺省 `~/.boss-auto-apply/`。profile 单独可用 `BOSS_APPLY_PROFILE` 指定。库里 `pipeline.dataDir()` / `pipeline.ledgerPath()` / `pipeline.runDir(name)` 给出路径，别手拼。
 
 ## 规则与坑（按需读，别一上来全加载）
 
@@ -99,13 +97,13 @@ ego-browser 的 `nodejs` 是 **ESM，没有 `require`**，加载库用 `(await i
 ```js
 const SKILL = '<本 skill 目录绝对路径，即 SKILL.md 所在目录>'
 const { makeH } = (await import(SKILL + '/scripts/ego_browser_adapter.js')).default
-const v2 = (await import(SKILL + '/scripts/pipeline_v2_lib.js')).default
+const pipeline = (await import(SKILL + '/scripts/pipeline.js')).default
 const { loadProfile } = (await import(SKILL + '/scripts/profile.js')).default
 const profile = loadProfile()                              // 没有 / 不合法直接抛，先去「首次使用」
 const task = await taskSpace('boss-agent-YYYYMMDD-AM')   // 首轮建；后续轮 taskSpace(<spaceId>) 复用同一个
 const page = task.page('p1')
-const pipe = v2.makePipelineV2(makeH(page), profile)
-const runDir = v2.runDir('YYYY-MM-DD-AM')                 // → ~/.boss-auto-apply/runs/YYYY-MM-DD-AM
+const pipe = pipeline.makePipeline(makeH(page), profile)
+const runDir = pipeline.runDir('YYYY-MM-DD-AM')                 // → ~/.boss-auto-apply/runs/YYYY-MM-DD-AM
 ```
 
 ### 1. 粗筛 DISCOVER（只滚只记，不发消息）
@@ -135,7 +133,7 @@ const r = await pipe.screenLoop(runDir, page)   // maxSend / budgetS 缺省取 p
 ### 3. 收尾 LEDGER
 
 ```js
-v2.updateLedgerFromCheckpoint(v2.ledgerPath(), runDir + '/checkpoint.jsonl', 'YYYY-MM-DD', runDir + '/details.jsonl')
+pipeline.updateLedgerFromCheckpoint(pipeline.ledgerPath(), runDir + '/checkpoint.jsonl', 'YYYY-MM-DD', runDir + '/details.jsonl')
 // applied 来自 VERIFIED checkpoint 行 + SKIPPED details 行（BOSS 显示已沟通）；eliminated 来自 ELIMINATED details 行（toLedger=false 除外）；均幂等
 ```
 
@@ -150,8 +148,6 @@ v2.updateLedgerFromCheckpoint(v2.ledgerPath(), runDir + '/checkpoint.jsonl', 'YY
 ## 测试（改库后必跑）
 
 ```bash
-node tests/test_pipeline_v2.js          # 纯逻辑：粗筛/细筛规则、hook、profile 合并校验、台账幂等、discover/screenLoop mock
-node tests/test_batch_apply_lib.js      # 投递库 + 消息模板
-node tests/test_runner_checkpoint.js    # v1 断点语义
-node tests/test_pipeline_logic.js       # v1 流水线回归
+node tests/test_pipeline.js   # 纯逻辑：粗筛/细筛规则、hook、profile 合并校验、台账幂等、discover/screenLoop mock
+node tests/test_apply.js      # 投递库 + 消息模板
 ```
