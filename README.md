@@ -1,5 +1,9 @@
 # boss-auto-apply-skill
 
+<p align="center">
+  <img src="assets/banner.webp" alt="帮我投BOSS —— AI Agent 自动投递 · 多城市多岗位" width="100%">
+</p>
+
 BOSS直聘自动投递 **Agent Skill**，任何行业、任何城市、应届和实习生都能用。装进 Claude Code / Codex / Cursor 等任意支持 skills 的 agent，对它说一句「帮我投 BOSS」，它先引导你把身份和想投的城市 / 岗位问清楚，再按**你自己的** `profile.json` 跑完：多城市多岗位粗筛（滚动记录）→ 细筛（串行单岗闭环，过审即发不攒批）→ 台账回填。防风控、断点续跑、猎头挂单过滤、列表页反爬薪资字体解码。
 
 代码里没有任何个人信息，也**没有任何行业预设**（默认不限薪资、不限经验、不拦任何岗位类型）——谁在投、投哪、投什么、拦什么，全部来自你的 profile；信息不全，agent 不会开始投。
