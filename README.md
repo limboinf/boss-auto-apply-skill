@@ -9,12 +9,9 @@ BOSS直聘自动投递 **Agent Skill**。装进 Claude Code / Codex / Cursor 等
 用 [skills CLI](https://skills.sh)（`npx skills`）一条命令装到任意 agent：
 
 ```bash
-npx skills add limboinf/boss-auto-apply-skill -g -a claude-code -y
+npx skills add limboinf/boss-auto-apply-skill
 ```
 
-- `-g`：装到用户级（`~/.agents/skills/boss-auto-apply-skill`，各 agent 的 skills 目录软链过去），所有项目可用
-- `-a`：目标 agent，可重复；`-a '*'` 装到所有检测到的 agent；不带 `-a` 会交互式选
-- 先看不装：`npx skills add limboinf/boss-auto-apply-skill --list`
 - 更新 / 卸载：`npx skills update boss-auto-apply-skill` / `npx skills remove boss-auto-apply-skill`
 
 不想用 CLI，clone 再软链也一样（软链后改仓库即改 skill，开发时用这种）：
@@ -22,6 +19,7 @@ npx skills add limboinf/boss-auto-apply-skill -g -a claude-code -y
 ```bash
 git clone https://github.com/limboinf/boss-auto-apply-skill.git
 ln -s "$(pwd)/boss-auto-apply-skill" ~/.claude/skills/boss-auto-apply-skill     # Claude Code
+ln -s "$(pwd)/boss-auto-apply-skill" ~/.agents/skills/boss-auto-apply-skill     # Codex 
 ln -s "$(pwd)/boss-auto-apply-skill" ~/.hermes/skills/career/boss-auto-apply-skill   # Hermes
 ```
 
@@ -29,26 +27,17 @@ ln -s "$(pwd)/boss-auto-apply-skill" ~/.hermes/skills/career/boss-auto-apply-ski
 
 | 依赖 | 作用 | 怎么装 / 检查 |
 |---|---|---|
-| **Node.js ≥ 18** | 跑库和测试 | `node -v`；库零第三方依赖，不用 `npm install` |
-| **[ego lite](https://lite.ego.app/)**（macOS） | 提供 `ego-browser` 命令：滚列表、开详情页、发消息全靠它，且直接用你已登录的 BOSS 会话 | 官网下载安装，完成首次 onboarding；`command -v ego-browser` 能找到即可（找不到先 `export PATH="$HOME/.local/bin:$PATH"`） |
+| **[ego lite](https://lite.ego.app/)**（macOS） | 提供 `ego-browser` 命令：滚列表、开详情页、发消息全靠它，且直接用你已登录的 BOSS 会话；自带 Node 运行时，**不用另装 Node** | 官网下载安装，完成首次 onboarding；`command -v ego-browser` 能找到即可（找不到先 `export PATH="$HOME/.local/bin:$PATH"`） |
 | **ego-browser skill** | 教 agent 怎么用 ego lite（`taskSpace` / `page` / heredoc） | `npx skills add citrolabs/ego-lite --skill ego-browser -g -a claude-code -y` |
 | **BOSS直聘登录态** | 在 ego lite 里登录一次 | 粗筛内置登录预检，失效即停交你扫码 |
 
-换别的浏览器自动化（Playwright 等）只需另写一个 `makeH(page)` 适配器，接口契约见 [SKILL.md](SKILL.md)「依赖」。
+库零第三方依赖，不用 `npm install`。换别的浏览器自动化（Playwright 等）只需另写一个 `makeH(page)` 适配器，接口契约见 [SKILL.md](SKILL.md)「依赖」。
 
 ## 首次使用：建 profile
 
-装完先生成 profile（在 `~/.boss-auto-apply/`，不在代码目录里）：
+**不用敲命令。** 装完直接对 agent 说「帮我投 BOSS」，它会按 [SKILL.md](SKILL.md)「首次使用」一次性把自我介绍、链接、话术、城市、关键词、薪资线、黑名单等问齐，自己写到 `~/.boss-auto-apply/profile.json`，校验后把摘要念给你确认。
 
-```bash
-node ~/.agents/skills/boss-auto-apply-skill/scripts/profile.js init
-```
-
-然后直接对 agent 说「帮我投 BOSS」——它会按 [SKILL.md](SKILL.md)「首次使用」一次性把自我介绍、链接、话术、城市、关键词、薪资线、黑名单等问齐并写进 profile；也可以自己照 [assets/profile.example.json](assets/profile.example.json) 手填。填完校验：
-
-```bash
-node ~/.agents/skills/boss-auto-apply-skill/scripts/profile.js check
-```
+想自己手填也行：照 [assets/profile.example.json](assets/profile.example.json) 写到 `~/.boss-auto-apply/profile.json`，然后让 agent「检查一下 profile」。
 
 ## 日常使用
 
@@ -102,7 +91,7 @@ v2.updateLedgerFromCheckpoint(v2.ledgerPath(), runDir + '/checkpoint.jsonl', '20
 
 ```bash
 git clone https://github.com/limboinf/boss-auto-apply-skill.git && cd boss-auto-apply-skill
-for t in tests/*.js; do node "$t"; done     # 离线测试，无需浏览器 / 网络
+for t in tests/*.js; do node "$t"; done     # 离线测试，无需浏览器 / 网络（开发者跑测试才需要系统 Node ≥ 18）
 ```
 
 - `scripts/pipeline_v2_lib.js` 主库：纯逻辑（`filterCards` / `evalDetail` / `makeHook` / `updateLedgerFromCheckpoint`）+ 浏览器流程（`discover` / `screenLoop`）

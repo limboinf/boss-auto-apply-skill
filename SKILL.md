@@ -2,7 +2,7 @@
 name: boss-auto-apply-skill
 description: BOSS直聘自动投递流水线：按用户 profile.json 里的身份和偏好，粗筛滚动记录→细筛串行单岗闭环（过审即发不攒批），防风控、断点续跑、台账去重，需要 ego-browser 等浏览器自动化。Use when 用户说"帮我投简历 / 投 BOSS / 跑今天的投递批次 / 改投递规则"。首次使用先按「首次使用」一节把 profile 问出来。
 license: All Rights Reserved（未获授权勿商用）
-compatibility: Requires Node.js >= 18 and ego-browser (ego lite, https://lite.ego.app, macOS) with the ego-browser skill installed; a logged-in BOSS直聘 (zhipin.com) session in that browser; network access to zhipin.com only.
+compatibility: Requires ego-browser (ego lite, https://lite.ego.app, macOS; bundles its own Node runtime) with the ego-browser skill installed; a logged-in BOSS直聘 (zhipin.com) session in that browser; network access to zhipin.com only.
 metadata:
   author: limboinf
   version: "2.1"
@@ -14,10 +14,10 @@ metadata:
 
 ## 首次使用：先把 profile 建起来（agent 必做）
 
-没有 profile 库会直接拒绝跑（`loadProfile` 抛错），**不要**拿模板里的示例身份去投。流程：
+没有 profile 库会直接拒绝跑（`loadProfile` 抛错），**不要**拿模板里的示例身份去投。**全程由 agent 动手，不让用户敲任何命令**（用户可能没装 Node、不会开终端）：
 
-1. `node <skill目录>/scripts/profile.js init` → 从 `assets/profile.example.json` 复制到 `~/.boss-auto-apply/profile.json`（数据目录与代码目录分离，`npx skills update` 重装不会抹掉；要换位置设 `BOSS_APPLY_DATA` 或 `BOSS_APPLY_PROFILE`）
-2. 用下面的问题把用户的答案问出来（一次问完，别挤牙膏），写进 `~/.boss-auto-apply/profile.json`：
+1. 读 `assets/profile.example.json` 当字段模板（只看结构，示例身份不能用）
+2. 用下面的问题把用户的答案问出来（一次问完，别挤牙膏），agent 自己把 JSON 写到 `~/.boss-auto-apply/profile.json`（目录不存在就建；数据目录与代码目录分离，`npx skills update` 重装不会抹掉；要换位置设 `BOSS_APPLY_DATA` 或 `BOSS_APPLY_PROFILE`）。用户没提的字段直接省略，库有默认值：
 
 | 问 | 写到 | 说明 |
 |---|---|---|
@@ -36,7 +36,14 @@ metadata:
 | 每轮最多发几个、间隔 | `pacing` | 默认 7 个 / 20-35s；间隔下限 15s 写死在库里，改小无效（防风控） |
 | 还想拦哪些岗位类型 | `rules.extraRejectTitles` | 追加式 `[{pattern, reason}]`；实习/校招、储备/管培、销售、客服 4 条固定生效不用写。想拦产品经理/测试/运维/讲师就加一条（模板里有示例） |
 
-3. `node <skill目录>/scripts/profile.js check` → 打印摘要，用户确认无误再跑。
+3. 校验并把摘要念给用户确认，无误再跑。系统有 `node` 就 `node <skill目录>/scripts/profile.js check`；没有就用 ego lite 自带的 Node：
+
+   ```bash
+   ego-browser nodejs <<'EOF'
+   const { loadProfile, summarize } = (await import('<skill目录>/scripts/profile.js')).default
+   console.log(summarize(loadProfile()))   // 不合法会抛错并逐条列出哪个字段错
+   EOF
+   ```
 
 **profile 里没有的东西就是不该改的**：反爬字体解码、页面选择器、会话定位、发送三重兜底、间隔下限——这些改了只会坏。
 
@@ -44,12 +51,12 @@ metadata:
 
 | 依赖 | 检查 | 缺了怎么办 |
 |---|---|---|
-| Node.js ≥ 18 | `node -v` | 库零第三方依赖，不用 `npm install` |
-| ego lite 浏览器（提供 `ego-browser` 命令） | `command -v ego-browser` | 按 ego-browser skill 的 `references/install.md` 装（macOS），装完用户在 GUI 完成 onboarding；找不到命令先 `export PATH="$HOME/.local/bin:$PATH"` |
+| ego lite 浏览器（提供 `ego-browser` 命令，自带 Node 24，**用户不用另装 Node**） | `command -v ego-browser` | 按 ego-browser skill 的 `references/install.md` 装（macOS），装完用户在 GUI 完成 onboarding；找不到命令先 `export PATH="$HOME/.local/bin:$PATH"` |
 | ego-browser skill（`taskSpace` / `page` / heredoc 用法都在它那） | agent 已加载 `ego-browser` skill | `npx skills add citrolabs/ego-lite --skill ego-browser -g -y` |
 | BOSS直聘登录态 | 粗筛内置登录预检 | 失效即停并 handOff 交用户扫码，游客态不跑 |
 
 - 浏览器只依赖 `h` 接口：`js(exprString)→Promise<any>` 在页面求值表达式；`click(selector | [x,y], {label})`；`wait(seconds)`；`gotoAndWait(url, {timeout, settle})` 秒；`pageInfo()→{url}`。`scripts/ego_browser_adapter.js` 的 `makeH(page)` 把 ego 的 Page 映射成 `h`；换别的浏览器自动化只需另写一个 `makeH`。粗筛另外直接用 `page.goto / waitForLoadState / cdp('Input.dispatchMouseEvent')`
+- 库零第三方依赖，不用 `npm install`；整个流程都在 `ego-browser nodejs` 里跑，系统 Node 只有开发者跑 `tests/` 才需要
 - 纯逻辑函数（规则判定 / hook / 台账）不碰浏览器，可离线跑测试
 
 ## 目录结构
